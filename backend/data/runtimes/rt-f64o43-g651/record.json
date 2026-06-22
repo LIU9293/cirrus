@@ -1,0 +1,432 @@
+{
+  "id": "rt-f64o43-g651",
+  "name": "Community Agents Install Smoke",
+  "agents": [
+    {
+      "key": "community:Hermes",
+      "name": "Hermes",
+      "source": "community",
+      "modelConfig": {
+        "mode": "platform",
+        "platformModel": "gpt-5.5",
+        "authStatus": "authorized",
+        "customApiKeySet": false
+      },
+      "capabilities": [
+        "multi-agent coordination",
+        "workflow planning",
+        "handoff routing",
+        "status synthesis"
+      ],
+      "installation": {
+        "status": "ready",
+        "adapter": "platform-llm-adapter",
+        "version": "0.1.0",
+        "installedAt": "2026-06-22T10:22:01.303Z",
+        "error": null,
+        "logs": [
+          "2026-06-22T10:21:59.256Z installed Hermes into runtime sandbox",
+          "{\"ok\":true,\"host\":\"e2b.local\",\"dir\":\"/home/user/terr/agents/community_Hermes\",\"manifest\":{\"key\":\"community:Hermes\",\"name\":\"Hermes\",\"description\":\"Multi-agent orchestration framework for complex, long-running workflows.\",\"adapter\":\"platform-llm-adapter\",\"version\":\"0.1.0\",\"capabilities\":[\"multi-agent coordination\",\"workflow planning\",\"handoff routing\",\"status synthesis\"],\"installNotes\":[\"Installed as a Terr platform LLM adapter. Native Hermes package support can replace this adapter later.\"]}}"
+        ]
+      }
+    },
+    {
+      "key": "community:OpenClaw",
+      "name": "OpenClaw",
+      "source": "community",
+      "modelConfig": {
+        "mode": "platform",
+        "platformModel": "gpt-5.5",
+        "authStatus": "authorized"
+      },
+      "capabilities": [
+        "browser task planning",
+        "website automation planning",
+        "DOM/action reasoning"
+      ],
+      "installation": {
+        "status": "ready",
+        "adapter": "platform-llm-adapter",
+        "version": "0.1.0",
+        "installedAt": "2026-06-22T10:22:02.012Z",
+        "error": null,
+        "logs": [
+          "2026-06-22T10:22:01.304Z installed OpenClaw into runtime sandbox",
+          "{\"ok\":true,\"host\":\"e2b.local\",\"dir\":\"/home/user/terr/agents/community_OpenClaw\",\"manifest\":{\"key\":\"community:OpenClaw\",\"name\":\"OpenClaw\",\"description\":\"Open web-browsing automation agent that drives real sites.\",\"adapter\":\"platform-llm-adapter\",\"version\":\"0.1.0\",\"capabilities\":[\"browser task planning\",\"website automation planning\",\"DOM/action reasoning\"],\"installNotes\":[\"Installed as a Terr platform LLM adapter. Browser-control tools will be wired as explicit capabilities later.\"]}}"
+        ]
+      }
+    },
+    {
+      "key": "community:Pi Agent",
+      "name": "Pi Agent",
+      "source": "community",
+      "modelConfig": {
+        "mode": "platform",
+        "platformModel": "gpt-5.5",
+        "authStatus": "authorized"
+      },
+      "capabilities": [
+        "tool calling patterns",
+        "agent loop design",
+        "structured reasoning"
+      ],
+      "installation": {
+        "status": "ready",
+        "adapter": "platform-llm-adapter",
+        "version": "0.1.0",
+        "installedAt": "2026-06-22T10:22:02.764Z",
+        "error": null,
+        "logs": [
+          "2026-06-22T10:22:02.012Z installed Pi Agent into runtime sandbox",
+          "{\"ok\":true,\"host\":\"e2b.local\",\"dir\":\"/home/user/terr/agents/community_Pi_Agent\",\"manifest\":{\"key\":\"community:Pi Agent\",\"name\":\"Pi Agent\",\"description\":\"Lightweight, framework-agnostic tool-calling agent core.\",\"adapter\":\"platform-llm-adapter\",\"version\":\"0.1.0\",\"capabilities\":[\"tool calling patterns\",\"agent loop design\",\"structured reasoning\"],\"installNotes\":[\"Installed as a Terr platform LLM adapter using the current platform model.\"]}}"
+        ]
+      }
+    },
+    {
+      "key": "community:Claude Code",
+      "name": "Claude Code",
+      "source": "community",
+      "modelConfig": {
+        "mode": "platform",
+        "platformModel": "gpt-5.5",
+        "subscriptionProvider": "claude_code",
+        "authStatus": "not_configured"
+      },
+      "capabilities": [
+        "codebase reasoning",
+        "patch planning",
+        "terminal workflow guidance"
+      ],
+      "installation": {
+        "status": "ready",
+        "adapter": "platform-llm-adapter",
+        "version": "0.1.0",
+        "installedAt": "2026-06-22T10:22:03.487Z",
+        "error": null,
+        "logs": [
+          "2026-06-22T10:22:02.765Z installed Claude Code into runtime sandbox",
+          "{\"ok\":true,\"host\":\"e2b.local\",\"dir\":\"/home/user/terr/agents/community_Claude_Code\",\"manifest\":{\"key\":\"community:Claude Code\",\"name\":\"Claude Code\",\"description\":\"Anthropic's agentic coding assistant for the terminal and IDE.\",\"adapter\":\"platform-llm-adapter\",\"version\":\"0.1.0\",\"capabilities\":[\"codebase reasoning\",\"patch planning\",\"terminal workflow guidance\"],\"installNotes\":[\"Native Claude Code subscription auth is a skeleton; current adapter uses the Terr platform model.\"]}}"
+        ]
+      }
+    },
+    {
+      "key": "community:Codex",
+      "name": "Codex",
+      "source": "community",
+      "modelConfig": {
+        "mode": "platform",
+        "platformModel": "gpt-5.5",
+        "subscriptionProvider": "codex",
+        "authStatus": "authorized",
+        "customApiKeySet": false
+      },
+      "capabilities": [
+        "software engineering",
+        "repo inspection",
+        "implementation planning",
+        "test strategy"
+      ],
+      "installation": {
+        "status": "ready",
+        "adapter": "platform-llm-adapter",
+        "version": "0.1.0",
+        "installedAt": "2026-06-22T10:22:04.221Z",
+        "error": null,
+        "logs": [
+          "2026-06-22T10:22:03.488Z installed Codex into runtime sandbox",
+          "{\"ok\":true,\"host\":\"e2b.local\",\"dir\":\"/home/user/terr/agents/community_Codex\",\"manifest\":{\"key\":\"community:Codex\",\"name\":\"Codex\",\"description\":\"OpenAI's autonomous software-engineering agent.\",\"adapter\":\"platform-llm-adapter\",\"version\":\"0.1.0\",\"capabilities\":[\"software engineering\",\"repo inspection\",\"implementation planning\",\"test strategy\"],\"installNotes\":[\"Native Codex subscription auth is a skeleton; current adapter uses the Terr platform model.\"]}}"
+        ]
+      }
+    },
+    {
+      "key": "community:OpenCode",
+      "name": "OpenCode",
+      "source": "community",
+      "modelConfig": {
+        "mode": "platform",
+        "platformModel": "gpt-5.5",
+        "subscriptionProvider": "opencode",
+        "authStatus": "authorized",
+        "customEndpoint": "https://example.invalid/v1",
+        "customApiKeySet": true
+      },
+      "capabilities": [
+        "coding workflows",
+        "CLI-oriented engineering guidance",
+        "open-source agent operations"
+      ],
+      "installation": {
+        "status": "ready",
+        "adapter": "platform-llm-adapter",
+        "version": "0.1.0",
+        "installedAt": "2026-06-22T10:22:04.928Z",
+        "error": null,
+        "logs": [
+          "2026-06-22T10:22:04.222Z installed OpenCode into runtime sandbox",
+          "{\"ok\":true,\"host\":\"e2b.local\",\"dir\":\"/home/user/terr/agents/community_OpenCode\",\"manifest\":{\"key\":\"community:OpenCode\",\"name\":\"OpenCode\",\"description\":\"Open-source AI coding agent you can run anywhere.\",\"adapter\":\"platform-llm-adapter\",\"version\":\"0.1.0\",\"capabilities\":[\"coding workflows\",\"CLI-oriented engineering guidance\",\"open-source agent operations\"],\"installNotes\":[\"Native OpenCode install/auth is a skeleton; current adapter uses the Terr platform model.\"]}}"
+        ]
+      }
+    }
+  ],
+  "status": "paused",
+  "sandboxId": "i38klvz3kq1gmxlfnvw3y",
+  "sandboxKind": "e2b",
+  "sandboxError": null,
+  "bots": [],
+  "messages": [
+    {
+      "id": "m-mqp2h8cj",
+      "role": "user",
+      "content": "OpenClaw，用一句话说明你现在是通过什么方式在runtime里面运行的。"
+    },
+    {
+      "id": "a-mqp2h8cj",
+      "role": "assistant",
+      "content": "我现在是通过已安装的 Terr community-agent adapter 在 runtime 的 E2B sandbox 中被调用运行的。",
+      "activities": [
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent routing: orchestrated"
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent sees 6 agent specs."
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent selected: OpenClaw"
+        },
+        {
+          "kind": "status",
+          "text": "Invoking installed OpenClaw adapter in E2B sandbox"
+        },
+        {
+          "kind": "status",
+          "text": "Sandbox host: e2b.local"
+        },
+        {
+          "kind": "status",
+          "text": "Installed adapter: /home/user/terr/agents/community_OpenClaw"
+        }
+      ]
+    },
+    {
+      "id": "m-mqp2hjs2",
+      "role": "user",
+      "content": "Codex，用一句话说明你的模型配置模式，以及原生订阅授权是否已经接上。"
+    },
+    {
+      "id": "a-mqp2hjs2",
+      "role": "assistant",
+      "content": "我当前通过 Terr community-agent adapter 在 E2B sandbox 中以 **platform 模式**运行，原生 Codex 登录/订阅授权配置在 schema 中可见但此 adapter 尚未接入启用。",
+      "activities": [
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent routing: orchestrated"
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent sees 6 agent specs."
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent selected: Codex"
+        },
+        {
+          "kind": "status",
+          "text": "Invoking installed Codex adapter in E2B sandbox"
+        },
+        {
+          "kind": "status",
+          "text": "Sandbox host: e2b.local"
+        },
+        {
+          "kind": "status",
+          "text": "Installed adapter: /home/user/terr/agents/community_Codex"
+        }
+      ]
+    },
+    {
+      "id": "m-mqp2wlhw",
+      "role": "user",
+      "content": "Codex，用一句话说你当前使用的模型配置模式。"
+    },
+    {
+      "id": "a-mqp2wlhw",
+      "role": "assistant",
+      "content": "我当前使用的是 **platform 模式**，通过 Terr community-agent adapter 调用，原生 Codex 登录/订阅鉴权未连接。",
+      "activities": [
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent routing: orchestrated"
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent sees 6 agent specs."
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent selected: Codex"
+        },
+        {
+          "kind": "status",
+          "text": "Invoking installed Codex adapter in E2B sandbox"
+        },
+        {
+          "kind": "status",
+          "text": "Sandbox host: e2b.local"
+        },
+        {
+          "kind": "status",
+          "text": "Installed adapter: /home/user/terr/agents/community_Codex"
+        }
+      ]
+    },
+    {
+      "id": "m-mqp2xqs5",
+      "role": "user",
+      "content": "OpenCode，用一句话说明你的adapter路径。"
+    },
+    {
+      "id": "a-mqp2xqs5",
+      "role": "assistant",
+      "content": "我的 adapter 路径是 Terr runtime 内的已安装 community-agent adapter（platform-llm-adapter 0.1.0），运行在 E2B sandbox 中。",
+      "activities": [
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent routing: orchestrated"
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent sees 6 agent specs."
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent selected: OpenCode"
+        },
+        {
+          "kind": "status",
+          "text": "Invoking installed OpenCode adapter in E2B sandbox"
+        },
+        {
+          "kind": "status",
+          "text": "Sandbox host: e2b.local"
+        },
+        {
+          "kind": "status",
+          "text": "Installed adapter: /home/user/terr/agents/community_OpenCode"
+        }
+      ]
+    },
+    {
+      "id": "m-mqp435up",
+      "role": "user",
+      "content": "@Claude Code 用一句话说你是不是被@快捷调用的。"
+    },
+    {
+      "id": "a-mqp435up",
+      "role": "assistant",
+      "content": "是的，我是通过 `@Claude Code` 快捷调用到的。",
+      "activities": [
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent routing: orchestrated"
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent sees 6 agent specs."
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent selected: Claude Code"
+        },
+        {
+          "kind": "status",
+          "text": "Invoking installed Claude Code adapter in E2B sandbox"
+        },
+        {
+          "kind": "status",
+          "text": "Sandbox host: e2b.local"
+        },
+        {
+          "kind": "status",
+          "text": "Installed adapter: /home/user/terr/agents/community_Claude_Code"
+        }
+      ]
+    },
+    {
+      "id": "m-mqp4jb55",
+      "role": "user",
+      "content": "@Hermes 用markdown回答：**ok** 和一条列表。"
+    },
+    {
+      "id": "a-mqp4jb55",
+      "role": "assistant",
+      "content": "**ok**\n\n- 已收到请求。",
+      "activities": [
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent routing: orchestrated"
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent sees 6 agent specs."
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent selected: Hermes"
+        },
+        {
+          "kind": "status",
+          "text": "Invoking installed Hermes adapter in E2B sandbox"
+        },
+        {
+          "kind": "status",
+          "text": "Sandbox host: e2b.local"
+        },
+        {
+          "kind": "status",
+          "text": "Installed adapter: /home/user/terr/agents/community_Hermes"
+        }
+      ]
+    },
+    {
+      "id": "m-mqp4jnrf",
+      "role": "user",
+      "content": "@Hermes 用markdown回答：**ok** 和一条列表。"
+    },
+    {
+      "id": "a-mqp4jnrf",
+      "role": "assistant",
+      "content": "**ok**\n\n- 已收到。",
+      "activities": [
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent routing: orchestrated"
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent sees 6 agent specs."
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent selected: Hermes"
+        },
+        {
+          "kind": "status",
+          "text": "Invoking installed Hermes adapter in E2B sandbox"
+        },
+        {
+          "kind": "status",
+          "text": "Sandbox host: e2b.local"
+        },
+        {
+          "kind": "status",
+          "text": "Installed adapter: /home/user/terr/agents/community_Hermes"
+        }
+      ]
+    }
+  ],
+  "createdAt": "2026-06-22T10:21:58.933Z",
+  "updatedAt": "2026-06-22T11:24:17.071Z"
+}

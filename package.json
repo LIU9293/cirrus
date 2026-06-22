@@ -1,0 +1,12 @@
+{
+  "name": "terr-miniapp-3",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Prototype: create and use agent-native miniapps end-to-end (reuses the Terr TerrUI bridge + single-file build).",
+  "scripts": {
+    "install:all": "npm install --prefix backend && npm install --prefix frontend && npm install --prefix miniapp-runtime",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev": "sh -c '(cd backend && npm run start &) && (cd frontend && npm run dev)'"
+  }
+}

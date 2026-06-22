@@ -1,0 +1,86 @@
+{
+  "id": "rt-hysb3y-4uf0",
+  "name": "背单词",
+  "agents": [
+    {
+      "key": "own:app-hqvpst-5j22",
+      "name": "趣味背单词挑战",
+      "source": "own",
+      "miniappId": "app-hqvpst-5j22"
+    },
+    {
+      "key": "community:Hermes",
+      "name": "Hermes",
+      "source": "community"
+    }
+  ],
+  "status": "stopped",
+  "sandboxId": "i388qkb7t7ijihgqgxdnq",
+  "sandboxKind": "e2b",
+  "sandboxError": "Sandbox i388qkb7t7ijihgqgxdnq not found",
+  "bots": [],
+  "messages": [
+    {
+      "id": "m-mqorw9bk",
+      "role": "user",
+      "content": "解释当前单词，并更新到应用状态里"
+    },
+    {
+      "id": "a-mqorw9bk",
+      "role": "assistant",
+      "content": "当前还没有正在进行的挑战题目（`questionIds` 为空，且 `started` 为 false），所以我暂时无法确定“当前单词”是哪一个，也就不能生成并更新解释。\n\n你可以先选择词库并开始挑战；进入某一道题后，再对我说“解释当前单词”，我就会把解释保存到应用状态里的 `explanations` 中。",
+      "activities": []
+    },
+    {
+      "id": "m-mqorxfv1",
+      "role": "user",
+      "content": "请用 generate_text 生成一个 resilient 的中文记忆法，并用 patch_state 保存到 explanations.test_resilient"
+    },
+    {
+      "id": "a-mqorxfv1",
+      "role": "assistant",
+      "content": "已生成并保存到 `explanations.test_resilient`。",
+      "activities": [
+        {
+          "kind": "tool",
+          "text": "Calling tool: generate_text"
+        },
+        {
+          "kind": "tool",
+          "text": "Updating app state"
+        }
+      ]
+    },
+    {
+      "id": "m-mqp15m3p",
+      "role": "user",
+      "content": "Hermes，用一句话告诉我你在哪里运行。"
+    },
+    {
+      "id": "a-mqp15m3p",
+      "role": "assistant",
+      "content": "Sandbox run failed: Paused sandbox i388qkb7t7ijihgqgxdnq not found",
+      "activities": [
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent routing: orchestrated"
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent sees 2 agent specs."
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent selected: Hermes"
+        },
+        {
+          "kind": "error",
+          "text": "Sandbox run failed: Paused sandbox i388qkb7t7ijihgqgxdnq not found",
+          "ok": false
+        }
+      ]
+    }
+  ],
+  "createdAt": "2026-06-22T01:49:17.436Z",
+  "updatedAt": "2026-06-22T09:45:46.789Z"
+}

@@ -1,0 +1,120 @@
+{
+  "id": "rt-uozol7-eu5f",
+  "name": "Gmail 管家前端验证",
+  "agents": [
+    {
+      "key": "own:app-yupdgs-5ibq",
+      "name": "Gmail 管家",
+      "source": "own",
+      "miniappId": "app-yupdgs-5ibq",
+      "modelConfig": {
+        "mode": "platform",
+        "platformModel": "gpt-5.5",
+        "authStatus": "authorized"
+      },
+      "installation": {
+        "status": "ready",
+        "adapter": "terr-own-agent",
+        "version": "0.1.0"
+      }
+    },
+    {
+      "key": "community:Hermes",
+      "name": "Hermes",
+      "source": "community",
+      "modelConfig": {
+        "mode": "platform",
+        "platformModel": "gpt-5.5",
+        "authStatus": "authorized"
+      },
+      "capabilities": [
+        "multi-agent coordination",
+        "workflow planning",
+        "handoff routing",
+        "status synthesis"
+      ],
+      "installation": {
+        "status": "not_installed",
+        "adapter": "platform-llm-adapter",
+        "version": "0.1.0"
+      }
+    }
+  ],
+  "status": "paused",
+  "sandboxId": "i69cme46axcoidk5eb0vg",
+  "sandboxKind": "e2b",
+  "sandboxError": null,
+  "bots": [],
+  "messages": [
+    {
+      "id": "m-mqp1gzvg",
+      "role": "user",
+      "content": "Hermes，用一句话告诉我你在哪里运行。"
+    },
+    {
+      "id": "a-mqp1gzvg",
+      "role": "assistant",
+      "content": "我运行在本次会话隔离的 E2B 云端沙盒环境中。",
+      "activities": [
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent routing: orchestrated"
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent sees 2 agent specs."
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent selected: Hermes"
+        },
+        {
+          "kind": "status",
+          "text": "Running selected community agent inside E2B sandbox"
+        },
+        {
+          "kind": "status",
+          "text": "Sandbox host: e2b.local"
+        }
+      ]
+    },
+    {
+      "id": "m-mqp1ic8l",
+      "role": "user",
+      "content": "Gmail 管家，本周邮件数是多少？用一句话回答。"
+    },
+    {
+      "id": "a-mqp1ic8l",
+      "role": "assistant",
+      "content": "本周邮件数是 11 封。",
+      "activities": [
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent routing: orchestrated"
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent sees 2 agent specs."
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent selected: Gmail 管家"
+        },
+        {
+          "kind": "status",
+          "text": "Running TerrRuntimeAgent loop in E2B sandbox…"
+        },
+        {
+          "kind": "status",
+          "text": "Sandbox host: e2b.local"
+        },
+        {
+          "kind": "tool",
+          "text": "Calling tool: query_records"
+        }
+      ]
+    }
+  ],
+  "createdAt": "2026-06-22T09:52:57.123Z",
+  "updatedAt": "2026-06-22T10:53:45.224Z"
+}

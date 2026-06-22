@@ -1,0 +1,29 @@
+{
+  "name": "terr-miniapp-3-backend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "diagnose:network": "node --import tsx src/scripts/diagnoseNetwork.ts",
+    "verify:gmail-digest": "node --import tsx src/scripts/verifyGmailDigest.ts",
+    "verify:runtime-gmail": "node --import tsx src/scripts/verifyRuntimeGmail.ts",
+    "verify:runtime-digest": "node --import tsx src/scripts/verifyRuntimeDigest.ts"
+  },
+  "dependencies": {
+    "@e2b/code-interpreter": "^2.6.1",
+    "@earendil-works/pi-agent-core": "^0.79.6",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "imapflow": "^1.4.1",
+    "openai": "^4.79.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

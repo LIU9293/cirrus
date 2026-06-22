@@ -1,0 +1,151 @@
+{
+  "id": "rt-ecyjzy-ybtu",
+  "name": "爱马仕",
+  "agents": [
+    {
+      "key": "community:Hermes",
+      "name": "Hermes",
+      "source": "community",
+      "modelConfig": {
+        "mode": "platform",
+        "platformModel": "gpt-5.5",
+        "authStatus": "authorized"
+      },
+      "capabilities": [
+        "multi-agent coordination",
+        "workflow planning",
+        "handoff routing",
+        "status synthesis"
+      ],
+      "installation": {
+        "status": "ready",
+        "adapter": "platform-llm-adapter",
+        "version": "0.1.0",
+        "installedAt": "2026-06-22T11:04:08.120Z",
+        "error": null,
+        "logs": [
+          "2026-06-22T11:04:06.136Z installed Hermes into runtime sandbox",
+          "{\"ok\":true,\"host\":\"e2b.local\",\"dir\":\"/home/user/terr/agents/community_Hermes\",\"manifest\":{\"key\":\"community:Hermes\",\"name\":\"Hermes\",\"description\":\"Multi-agent orchestration framework for complex, long-running workflows.\",\"adapter\":\"platform-llm-adapter\",\"version\":\"0.1.0\",\"capabilities\":[\"multi-agent coordination\",\"workflow planning\",\"handoff routing\",\"status synthesis\"],\"installNotes\":[\"Installed as a Terr platform LLM adapter. Native Hermes package support can replace this adapter later.\"]}}"
+        ]
+      }
+    }
+  ],
+  "status": "running",
+  "sandboxId": "ip6oa1g7999fmw3zof49f",
+  "sandboxKind": "e2b",
+  "sandboxError": null,
+  "bots": [],
+  "messages": [
+    {
+      "id": "m-mqp3yrtp",
+      "role": "user",
+      "content": "你是谁"
+    },
+    {
+      "id": "a-mqp3yrtp",
+      "role": "assistant",
+      "content": "我是 Hermes，一个运行时协调代理（runtime coordination agent）。我的职责是把任务拆解、协调可用代理/工具完成工作，并清楚说明编排决策。\n\n我当前是通过已安装的 Terr community-agent adapter 在 runtime 的 E2B sandbox 中被调用的。",
+      "activities": [
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent routing: direct"
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent sees 1 agent spec."
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent selected: Hermes"
+        },
+        {
+          "kind": "status",
+          "text": "Invoking installed Hermes adapter in E2B sandbox"
+        },
+        {
+          "kind": "status",
+          "text": "Sandbox host: e2b.local"
+        },
+        {
+          "kind": "status",
+          "text": "Installed adapter: /home/user/terr/agents/community_Hermes"
+        }
+      ]
+    },
+    {
+      "id": "m-mqp3z9gu",
+      "role": "user",
+      "content": "你能干什么"
+    },
+    {
+      "id": "a-mqp3z9gu",
+      "role": "assistant",
+      "content": "我可以作为 **Hermes 运行时协调代理**，帮助你做这些事：\n\n- **理解和拆解任务**：把复杂需求拆成可执行步骤。\n- **协调执行**：根据任务类型分配给合适的代理、工具或流程。\n- **解释决策**：说明为什么这样拆分、为什么选择某个执行路径。\n- **辅助规划**：制定项目计划、技术方案、迁移方案、调研路线等。\n- **代码与技术支持**：阅读代码、分析问题、设计接口、生成脚本、排查思路。\n- **文档与写作**：整理说明文档、需求文档、报告、邮件、总结。\n- **问答与推理**：回答概念问题，比较方案优劣，给出建议。\n\n简单说，我擅长把“你想完成的事”变成“清晰的步骤和执行方案”，并在需要时协调整个过程。",
+      "activities": [
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent routing: direct"
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent sees 1 agent spec."
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent selected: Hermes"
+        },
+        {
+          "kind": "status",
+          "text": "Invoking installed Hermes adapter in E2B sandbox"
+        },
+        {
+          "kind": "status",
+          "text": "Sandbox host: e2b.local"
+        },
+        {
+          "kind": "status",
+          "text": "Installed adapter: /home/user/terr/agents/community_Hermes"
+        }
+      ]
+    },
+    {
+      "id": "m-mqp4ymz8",
+      "role": "user",
+      "content": "@Hermes 简短回答：测试折叠状态。"
+    },
+    {
+      "id": "a-mqp4ymz8",
+      "role": "assistant",
+      "content": "测试成功：折叠状态正常。",
+      "durationMs": 4012,
+      "activities": [
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent routing: direct"
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent sees 1 agent spec."
+        },
+        {
+          "kind": "status",
+          "text": "TerrRuntimeAgent selected: Hermes"
+        },
+        {
+          "kind": "status",
+          "text": "Invoking installed Hermes adapter in E2B sandbox"
+        },
+        {
+          "kind": "status",
+          "text": "Sandbox host: e2b.local"
+        },
+        {
+          "kind": "status",
+          "text": "Installed adapter: /home/user/terr/agents/community_Hermes"
+        }
+      ]
+    }
+  ],
+  "createdAt": "2026-06-22T11:04:05.730Z",
+  "updatedAt": "2026-06-22T11:32:19.796Z"
+}

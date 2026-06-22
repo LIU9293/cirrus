@@ -1,0 +1,163 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.75rem;
+  /* Terr design palette (see design.pen) */
+  --background: #FAFAF9;
+  --foreground: #191917;
+  --card: #FFFFFF;
+  --card-foreground: #191917;
+  --popover: #FFFFFF;
+  --popover-foreground: #191917;
+  --primary: #5B57F2;
+  --primary-foreground: #FFFFFF;
+  --secondary: #F4F4F2;
+  --secondary-foreground: #191917;
+  --muted: #F4F4F2;
+  --muted-foreground: #6B6B64;
+  --accent: #F4F4F2;
+  --accent-foreground: #191917;
+  --destructive: #DC2626;
+  --border: #E7E7E3;
+  --input: #E7E7E3;
+  --ring: #5B57F2;
+
+  /* extra design tokens */
+  --accent-soft: #EDECFE;
+  --accent-ink: #3B38C4;
+  --surface: #FFFFFF;
+  --surface-muted: #F4F4F2;
+  --surface-sunken: #EFEFEC;
+  --ink: #191917;
+  --ink-secondary: #6B6B64;
+  --ink-tertiary: #A0A099;
+  --border-strong: #D8D8D3;
+  --live: #3FB984;
+  --live-soft: #E4F5ED;
+  --dot-color: #D5D5D0;
+}
+
+.dark {
+  --background: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.21 0.006 285.885);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.21 0.006 285.885);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.92 0.004 286.32);
+  --primary-foreground: oklch(0.21 0.006 285.885);
+  --secondary: oklch(0.274 0.006 286.033);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.274 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --accent: oklch(0.274 0.006 286.033);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.552 0.016 285.938);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-ink: var(--ink);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-tertiary: var(--ink-tertiary);
+  --color-live: var(--live);
+  --color-live-soft: var(--live-soft);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+}
+
+/* ── Free-canvas dot grid (Terr agent creation) ── */
+.dot-bg {
+  position: relative;
+  background-color: var(--background);
+}
+.dot-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(var(--dot-color) 1.2px, transparent 1.2px);
+  background-size: 22px 22px;
+  -webkit-mask-image: radial-gradient(circle at 50% 46%, #000 0%, #000 26%, transparent 72%);
+  mask-image: radial-gradient(circle at 50% 46%, #000 0%, #000 26%, transparent 72%);
+}
+
+@keyframes terr-col-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes terr-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes terr-pop {
+  0% { opacity: 0; transform: translateY(6px) scale(0.96); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes terr-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-9px); }
+}
+.terr-float { animation: terr-float 4s ease-in-out infinite; }
+.terr-float-slow { animation: terr-float 6.5s ease-in-out infinite; }
+.terr-float-rev { animation: terr-float 5.5s ease-in-out infinite reverse; }
+.terr-col-in { animation: terr-col-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.terr-fade-up { animation: terr-fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.terr-pop { animation: terr-pop 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* shimmering skeleton for "generating skills" */
+@keyframes terr-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.terr-shimmer {
+  background-image: linear-gradient(90deg, var(--surface-muted) 25%, var(--surface-sunken) 38%, var(--surface-muted) 54%);
+  background-size: 200% 100%;
+  animation: terr-shimmer 1.5s ease-in-out infinite;
+}
+@keyframes terr-blink {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
+}
+.terr-dot { animation: terr-blink 1.2s ease-in-out infinite; }

@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+/* The agent's source lives in ./app, which is .gitignored. Tailwind v4 skips
+   gitignored paths during auto content-detection, so register it explicitly —
+   otherwise none of the agent-authored utility classes get generated. */
+@source "./app/**/*.{tsx,ts,jsx,js}";
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+}
