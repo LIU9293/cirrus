@@ -3643,10 +3643,40 @@ function ConfigurationPanel({ runtimeId, runtime }: { runtimeId: string; runtime
         <div className="mt-1 text-[12px] text-ink-tertiary">Credentials &amp; settings for each agent — applied to this runtime only.</div>
       </div>
       {ownAgents.length === 0 ? (
-        <div className="text-[12.5px] text-ink-tertiary">No configurable agents in this runtime yet.</div>
+        <ConfigEmptyState />
       ) : (
         ownAgents.map((a) => <AgentConfigSection key={a.key} runtimeId={runtimeId} agent={a} />)
       )}
+    </div>
+  )
+}
+
+function ConfigEmptyState() {
+  return (
+    <div className="cirrus-fade-up flex flex-1 flex-col items-center justify-center gap-5 py-10 text-center">
+      <svg width="148" height="116" viewBox="0 0 148 116" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+        {/* soft halo */}
+        <ellipse cx="74" cy="60" rx="60" ry="44" fill="var(--accent-soft)" opacity="0.5" />
+        {/* settings card */}
+        <rect x="34" y="26" width="80" height="64" rx="11" fill="var(--surface)" stroke="var(--border-strong)" strokeWidth="1.6" />
+        {/* three sliders */}
+        <line x1="47" y1="44" x2="101" y2="44" stroke="var(--border-strong)" strokeWidth="2.4" strokeLinecap="round" />
+        <circle cx="63" cy="44" r="6" fill="var(--accent-soft)" stroke="var(--primary)" strokeWidth="2.2" />
+        <line x1="47" y1="58" x2="101" y2="58" stroke="var(--border-strong)" strokeWidth="2.4" strokeLinecap="round" />
+        <circle cx="86" cy="58" r="6" fill="var(--accent-soft)" stroke="var(--primary)" strokeWidth="2.2" />
+        <line x1="47" y1="72" x2="101" y2="72" stroke="var(--border-strong)" strokeWidth="2.4" strokeLinecap="round" />
+        <circle cx="55" cy="72" r="6" fill="var(--accent-soft)" stroke="var(--primary)" strokeWidth="2.2" />
+        {/* floating sparkle */}
+        <g className="cirrus-float-slow">
+          <path d="M115 30c.6-2.4.9-3.6 1.5-3.6s.9 1.2 1.5 3.6c.3 1.1.4 1.7.8 2.1s1 .5 2.1.8c2.4.6 3.6.9 3.6 1.5s-1.2.9-3.6 1.5c-1.1.3-1.7.4-2.1.8s-.5 1-.8 2.1c-.6 2.4-.9 3.6-1.5 3.6s-.9-1.2-1.5-3.6c-.3-1.1-.4-1.7-.8-2.1s-1-.5-2.1-.8c-2.4-.6-3.6-.9-3.6-1.5s1.2-.9 3.6-1.5c1.1-.3 1.7-.4 2.1-.8s.5-1 .8-2.1z" fill="var(--primary)" opacity="0.85" />
+        </g>
+      </svg>
+      <div className="flex flex-col gap-1.5">
+        <div className="text-[13.5px] font-semibold text-ink">Nothing to configure</div>
+        <div className="mx-auto max-w-[260px] text-[12px] leading-relaxed text-ink-tertiary">
+          None of this runtime&apos;s agents need credentials or settings. Add an agent with configurable skills and it&apos;ll show up here.
+        </div>
+      </div>
     </div>
   )
 }
