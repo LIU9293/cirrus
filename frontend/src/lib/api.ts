@@ -92,6 +92,16 @@ export async function logout(): Promise<void> {
   await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
 }
 
+/** How many runtimes use each community agent (keyed by "community:<Name>"). */
+export async function getCommunityUsage(): Promise<Record<string, number>> {
+  try {
+    const data = await json<{ usage: Record<string, number> }>(await fetch('/api/community/usage', { credentials: 'include' }))
+    return data.usage ?? {}
+  } catch {
+    return {}
+  }
+}
+
 export async function listMiniapps(): Promise<(MiniappRecord & { hasHtml: boolean })[]> {
   const data = await json<{ miniapps: (MiniappRecord & { hasHtml: boolean })[] }>(await fetch('/api/miniapps'))
   return data.miniapps

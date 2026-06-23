@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { motion, AnimatePresence } from 'motion/react'
 import {
   ArrowUp,
   ArrowRight,
@@ -74,6 +75,7 @@ import {
   updateRuntimeAgentModelConfig,
   getRuntimeAgentSkills,
   saveRuntimeAgentSkillSettings,
+  getCommunityUsage,
   getMiniapp,
   type AgentEvent,
   type ChatTurn,
@@ -2314,7 +2316,11 @@ function communityAgentRef(agent: CommunityAgent): RuntimeAgentRef {
   return { key: `community:${agent.name}`, name: agent.name, source: 'community' }
 }
 
-export function CommunityPage({ onNavigate }: { onNavigate: (v: NavView) => void }) {
+export function CommunityPage({ onNavigate: _onNavigate }: { onNavigate: (v: NavView) => void }) {
+  const [usage, setUsage] = useState<Record<string, number>>({})
+  useEffect(() => {
+    void getCommunityUsage().then(setUsage)
+  }, [])
   return (
     <div className="dot-bg relative h-full w-full overflow-auto">
       <div className={PAGE_CONTAINER_CLASS}>
@@ -2324,7 +2330,7 @@ export function CommunityPage({ onNavigate }: { onNavigate: (v: NavView) => void
         </div>
         <div className={PAGE_GRID_CLASS}>
           {COMMUNITY.map((a) => (
-            <CommunityAgentCard key={a.name} agent={a} />
+            <CommunityAgentCard key={a.name} agent={a} usedIn={usage[`community:${a.name}`] ?? 0} />
           ))}
         </div>
       </div>
@@ -2332,12 +2338,20 @@ export function CommunityPage({ onNavigate }: { onNavigate: (v: NavView) => void
   )
 }
 
-function CommunityAgentCard({ agent }: { agent: CommunityAgent }) {
+function CommunityAgentCard({ agent, usedIn }: { agent: CommunityAgent; usedIn: number }) {
   const [addOpen, setAddOpen] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const agentRef = communityAgentRef(agent)
 
   return (
-    <div className="group relative flex min-h-[152px] flex-col gap-3 rounded-[16px] border border-border bg-white p-5 text-left shadow-[0_8px_24px_-12px_rgba(25,25,23,0.10)] transition-shadow hover:shadow-[0_12px_30px_-12px_rgba(25,25,23,0.18)]">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => setExpanded((v) => !v)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded((v) => !v) } }}
+      aria-expanded={expanded}
+      className="flex min-h-[152px] cursor-pointer flex-col gap-3 rounded-[16px] border border-border bg-white p-5 text-left shadow-[0_8px_24px_-12px_rgba(25,25,23,0.10)] transition-shadow hover:shadow-[0_12px_30px_-12px_rgba(25,25,23,0.18)]"
+    >
       <div className="flex items-center gap-2.5">
         <div
           className="flex size-[34px] shrink-0 items-center justify-center rounded-[9px] border border-black/[0.04]"
@@ -2346,19 +2360,42 @@ function CommunityAgentCard({ agent }: { agent: CommunityAgent }) {
           <img src={agent.logoSrc} alt={agent.logoAlt} className="size-[22px] object-contain" draggable={false} />
         </div>
         <div className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{agent.name}</div>
+        <ChevronDown className={cn('size-4 shrink-0 text-ink-tertiary transition-transform duration-200', expanded && 'rotate-180')} />
       </div>
-      <div className="line-clamp-2 flex-1 text-[12.5px] leading-relaxed text-ink-secondary">{agent.desc}</div>
+      <div className={cn('flex-1 text-[12.5px] leading-relaxed text-ink-secondary', !expanded && 'line-clamp-2')}>{agent.desc}</div>
       <div className="flex items-center gap-2">
         <span className="rounded-full bg-surface-muted px-2.5 py-1 text-[11px] font-semibold text-ink-secondary">{agent.tag}</span>
-        <button
-          onClick={() => setAddOpen(true)}
-          className="ml-auto flex size-7 items-center justify-center rounded-[8px] border border-border bg-surface text-ink-secondary opacity-100 shadow-sm transition hover:bg-surface-muted sm:opacity-0 sm:group-hover:opacity-100"
-          aria-label={`Add ${agent.name} to runtime`}
-          title="Add to runtime"
-        >
-          <Plus className="size-[15px]" />
-        </button>
       </div>
+
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            key="more"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+            style={{ overflow: 'hidden' }}
+          >
+            <div className="mt-1 flex flex-col gap-3 border-t border-border pt-3">
+              <div className="flex items-center gap-2 text-[12px] text-ink-secondary">
+                <span className="grid size-5 place-items-center rounded-full bg-accent-soft text-[9px] font-bold text-accent-ink">C</span>
+                Created by <span className="font-semibold text-ink">Cirrus</span>
+              </div>
+              <div className="flex items-center gap-2 text-[12px] text-ink-secondary">
+                <Server className="size-4 text-ink-tertiary" />
+                Used in <span className="font-semibold text-ink">{usedIn}</span> runtime{usedIn === 1 ? '' : 's'}
+              </div>
+              <button
+                onClick={(e) => { e.stopPropagation(); setAddOpen(true) }}
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-[11px] bg-primary px-4 py-2.5 text-[13px] font-semibold text-primary-foreground hover:opacity-90"
+              >
+                Use this agent <ArrowRight className="size-[15px]" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {addOpen &&
         createPortal(

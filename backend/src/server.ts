@@ -23,7 +23,7 @@ import { planAndAttachSkills, developSkill, refineFile, chatAboutSkill, chatAbou
 import { listAgentTree, readAgentFile, writeAgentFile, ensureSoul } from './agentfs.ts'
 import { getDatastoreDriver } from './datastore/index.ts'
 import { getSandboxDriver } from './sandbox/index.ts'
-import { createRuntime, deleteRuntime, listRuntimes, loadRuntime, saveRuntime } from './runtimeStore.ts'
+import { createRuntime, deleteRuntime, listRuntimes, listAllRuntimes, loadRuntime, saveRuntime } from './runtimeStore.ts'
 import { getRuntimeSandboxStatus, provisionRuntimeSandbox } from './sandbox/runtimeSandbox.ts'
 import { startScheduler } from './scheduler.ts'
 import { installCommunityAgentInSandbox, normalizeRuntimeAgentRef } from './communityAgents.ts'
@@ -89,6 +89,18 @@ function activityToEvent(activity: NonNullable<DeveloperChatMessage['activities'
 
 app.get('/api/health', async (_req, res) => {
   res.json({ ok: true, model: config.model })
+})
+
+// Public: how many runtimes (across everyone) use each community agent. Powers
+// the "Used in N runtimes" stat on community cards.
+app.get('/api/community/usage', async (_req, res) => {
+  const usage: Record<string, number> = {}
+  for (const rt of await listAllRuntimes()) {
+    for (const a of rt.agents) {
+      if (a.source === 'community') usage[a.key] = (usage[a.key] ?? 0) + 1
+    }
+  }
+  res.json({ usage })
 })
 
 app.get('/api/miniapps', async (req, res) => {
