@@ -35,11 +35,15 @@ import {
   Bell,
   Github,
   KeyRound,
+  CalendarClock,
+  Pause,
+  Power,
 } from 'lucide-react'
 import type {
   BotPlatform,
   CanvasElementSelection,
   CreationPhase,
+  CronJob,
   MiniappDraft,
   MiniappRecord,
   MiniappSkill,
@@ -68,6 +72,11 @@ import {
   deleteRuntime as apiDeleteRuntime,
   updateRuntimeName,
   streamRuntimeChat,
+  listRuntimeCron,
+  createRuntimeCron,
+  updateRuntimeCron,
+  deleteRuntimeCron,
+  streamRuntimeCronChat,
   connectRuntimeBot,
   disconnectRuntimeBot,
   addRuntimeAgent,
@@ -3067,7 +3076,7 @@ function RuntimeWindow({
   const [runtime, setRuntime] = useState<RuntimeRecord | null>(null)
   const [miniapp, setMiniapp] = useState<MiniappRecord | null>(null)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
-  const [tab, setTab] = useState<'chat' | 'bots' | 'details' | 'config'>('chat')
+  const [tab, setTab] = useState<'chat' | 'bots' | 'details' | 'config' | 'cron'>('chat')
   const [showMiniapp, setShowMiniapp] = useState(false)
   const [messages, setMessages] = useState<UiMessage[]>([])
   const [sending, setSending] = useState(false)
@@ -3184,10 +3193,11 @@ function RuntimeWindow({
     if (rt) setRuntime(rt)
   }
 
-  const tabs: { key: 'chat' | 'bots' | 'details' | 'config'; label: string; icon: React.ReactNode; show: boolean }[] = [
+  const tabs: { key: 'chat' | 'bots' | 'details' | 'config' | 'cron'; label: string; icon: React.ReactNode; show: boolean }[] = [
     { key: 'chat', label: 'Chat', icon: <MessageSquare className="size-[15px]" />, show: true },
     { key: 'bots', label: 'Bots', icon: <Bot className="size-[15px]" />, show: true },
     { key: 'config', label: 'Configuration', icon: <KeyRound className="size-[15px]" />, show: true },
+    { key: 'cron', label: 'Cron', icon: <CalendarClock className="size-[15px]" />, show: true },
     { key: 'details', label: 'Details', icon: <LayoutGrid className="size-[15px]" />, show: true },
   ]
   const activeTab = tab
@@ -3452,6 +3462,7 @@ function RuntimeWindow({
           {activeTab === 'bots' && <BotsPanel bots={runtime?.bots ?? []} onConnect={connect} onDisconnect={disconnect} />}
           {activeTab === 'details' && <DetailsPanel runtime={runtime} agents={agents} onAddAgent={addAgent} onRemoveAgent={removeAgent} onUpdateAgentModel={updateAgentModel} />}
           {activeTab === 'config' && <ConfigurationPanel runtimeId={id} runtime={runtime} />}
+          {activeTab === 'cron' && <CronPanel runtimeId={id} runtime={runtime} compact={compactWindow} />}
         </div>
 
         {/* Corner resize handle */}
@@ -3520,9 +3531,9 @@ function DetailsPanel({
             {runtime && <StatusBadge status={runtime.status} />}
           </div>
           {runtime?.sandboxId && (
-            <div className="mt-2">
-              <span className="block text-ink-tertiary">Sandbox ID</span>
-              <span className="mt-0.5 block break-all font-mono text-[11px] text-ink">{runtime.sandboxId}</span>
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <span className="shrink-0 text-ink-tertiary">Sandbox ID</span>
+              <span className="min-w-0 break-all text-right font-mono text-[11px] text-ink">{runtime.sandboxId}</span>
             </div>
           )}
           {runtime?.sandboxError && <div className="mt-2 text-[11.5px] text-ink-tertiary">{runtime.sandboxError}</div>}
@@ -3676,6 +3687,178 @@ function ConfigEmptyState() {
         <div className="mx-auto max-w-[260px] text-[12px] leading-relaxed text-ink-tertiary">
           None of this runtime&apos;s agents need credentials or settings. Add an agent with configurable skills and it&apos;ll show up here.
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Cron tab: scheduled tasks for a runtime ──
+
+/** Best-effort human label for a 5-field cron expression; falls back to raw. */
+function describeCron(expr: string): string {
+  const parts = String(expr ?? '').trim().split(/\s+/)
+  if (parts.length !== 5) return expr
+  const [min, hr, dom, mon, dow] = parts
+  const dows = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const at = (h: string, m: string) => `${h.padStart(2, '0')}:${m.padStart(2, '0')}`
+  const isNum = (s: string) => /^\d+$/.test(s)
+  if (expr === '* * * * *') return 'Every minute'
+  if (/^\*\/\d+$/.test(min) && hr === '*' && dom === '*' && mon === '*' && dow === '*') return `Every ${min.slice(2)} minutes`
+  if (min === '0' && hr === '*' && dom === '*' && mon === '*' && dow === '*') return 'Hourly'
+  if (isNum(min) && isNum(hr) && dom === '*' && mon === '*' && dow === '*') return `Daily at ${at(hr, min)}`
+  if (isNum(min) && isNum(hr) && dom === '*' && mon === '*' && dow === '1-5') return `Weekdays at ${at(hr, min)}`
+  if (isNum(min) && isNum(hr) && dom === '*' && mon === '*' && isNum(dow)) return `Every ${dows[Number(dow) % 7]} at ${at(hr, min)}`
+  return expr
+}
+
+function formatRunTime(iso?: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+function CronJobCard({
+  job,
+  agentName,
+  onToggle,
+  onDelete,
+}: {
+  job: CronJob
+  agentName: string | null
+  onToggle: () => void
+  onDelete: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className={cn('rounded-[12px] border bg-surface transition', job.enabled ? 'border-border' : 'border-dashed border-border-strong opacity-75')}>
+      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left">
+        <span className={cn('mt-0.5 flex size-[26px] shrink-0 items-center justify-center rounded-[8px]', job.enabled ? 'bg-accent-soft text-accent-ink' : 'bg-surface-muted text-ink-tertiary')}>
+          <Clock className="size-[14px]" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-[12.5px] font-semibold text-ink">{job.name || job.message.slice(0, 40) || 'Scheduled task'}</span>
+            {!job.enabled && <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-ink-tertiary">paused</span>}
+          </span>
+          <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-ink-tertiary">
+            <span className="font-medium text-ink-secondary">{describeCron(job.schedule)}</span>
+            <span className="font-mono">{job.schedule}</span>
+            {agentName && <span>→ {agentName}</span>}
+          </span>
+        </span>
+        <ChevronDown className={cn('mt-1 size-3.5 shrink-0 text-ink-tertiary transition', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="border-t border-border px-3 py-2.5">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-ink-tertiary">Message</div>
+          <p className="mt-1 whitespace-pre-wrap break-words text-[12px] leading-relaxed text-ink">{job.message}</p>
+          <div className="mt-2.5 grid grid-cols-2 gap-2 text-[11px] text-ink-tertiary">
+            <div>Next run<div className="mt-0.5 font-medium text-ink-secondary">{job.enabled ? formatRunTime(job.nextRunAt) : 'paused'}</div></div>
+            <div>Last run<div className="mt-0.5 font-medium text-ink-secondary">{formatRunTime(job.lastRunAt)}</div></div>
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              onClick={onToggle}
+              className="inline-flex items-center gap-1.5 rounded-[8px] border border-border px-2.5 py-1.5 text-[11.5px] font-medium text-ink-secondary hover:bg-surface-muted"
+            >
+              {job.enabled ? <><Pause className="size-3.5" /> Pause</> : <><Power className="size-3.5" /> Enable</>}
+            </button>
+            <button
+              onClick={onDelete}
+              className="inline-flex items-center gap-1.5 rounded-[8px] border border-border px-2.5 py-1.5 text-[11.5px] font-medium text-destructive hover:bg-destructive/5"
+            >
+              <Trash2 className="size-3.5" /> Delete
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CronPanel({ runtimeId, runtime, compact }: { runtimeId: string; runtime: RuntimeRecord | null; compact: boolean }) {
+  const [jobs, setJobs] = useState<CronJob[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [messages, setMessages] = useState<UiMessage[]>([])
+  const [sending, setSending] = useState(false)
+
+  const refresh = () => listRuntimeCron(runtimeId).then(setJobs).catch((e) => setError(String((e as Error)?.message ?? e)))
+  useEffect(() => { void refresh() }, [runtimeId])
+
+  const agentName = (key?: string | null): string | null => {
+    if (!key) return null
+    return runtime?.agents.find((a) => a.key === key)?.name ?? key
+  }
+
+  const toggle = async (job: CronJob) => {
+    await updateRuntimeCron(runtimeId, job.id, { enabled: !job.enabled }).catch(() => {})
+    await refresh()
+  }
+  const remove = async (job: CronJob) => {
+    await deleteRuntimeCron(runtimeId, job.id).catch(() => {})
+    await refresh()
+  }
+
+  const send = async (text: string) => {
+    if (!text.trim() || sending) return
+    const userMsg: UiMessage = { id: 'u-' + Date.now().toString(36), role: 'user', content: text }
+    const history: ChatTurn[] = [...messages, userMsg].map((m) => ({ role: m.role, content: m.content }))
+    const assistantId = 'a-' + Date.now().toString(36)
+    const assistantMsg: UiMessage = { id: assistantId, role: 'assistant', content: '', activities: [{ kind: 'status', text: 'Scheduling assistant…' }] }
+    setMessages((prev) => [...prev, userMsg, assistantMsg])
+    setSending(true)
+    try {
+      for await (const ev of streamRuntimeCronChat(runtimeId, history)) {
+        setMessages((prev) => applyBuildChatEvent(prev, assistantId, ev))
+      }
+      await refresh()
+    } catch (err) {
+      setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: String((err as Error)?.message ?? err), activities: [{ kind: 'error', text: 'Scheduling assistant failed', ok: false }] } : m)))
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div className={cn('flex min-h-0 flex-1', compact ? 'flex-col' : 'flex-row')}>
+      {/* Left: configured jobs */}
+      <div className={cn('flex min-h-0 flex-col overflow-auto p-4', compact ? 'max-h-[45%] border-b border-black/5' : 'w-[320px] shrink-0 border-r border-black/5')}>
+        <div className="flex items-center justify-between">
+          <div className="font-mono text-[10.5px] tracking-[0.12em] text-ink-tertiary">SCHEDULED TASKS</div>
+          {jobs && jobs.length > 0 && <span className="text-[11px] text-ink-tertiary">{jobs.length}</span>}
+        </div>
+        {error && <div className="mt-2 text-[12px] text-destructive">{error}</div>}
+        {!jobs && !error && (
+          <div className="mt-3 flex items-center gap-2 text-[12px] text-ink-tertiary"><Loader2 className="size-3.5 animate-spin" /> Loading…</div>
+        )}
+        {jobs && jobs.length === 0 && (
+          <div className="cirrus-fade-up mt-6 flex flex-col items-center gap-3 px-2 text-center">
+            <span className="flex size-12 items-center justify-center rounded-full bg-accent-soft text-accent-ink"><CalendarClock className="size-6" /></span>
+            <div className="text-[12.5px] font-semibold text-ink">No scheduled tasks yet</div>
+            <div className="max-w-[230px] text-[11.5px] leading-relaxed text-ink-tertiary">Ask the assistant on the right to schedule a message to one of this runtime&apos;s agents.</div>
+          </div>
+        )}
+        {jobs && jobs.length > 0 && (
+          <div className="mt-3 flex flex-col gap-2">
+            {jobs.map((job) => (
+              <CronJobCard key={job.id} job={job} agentName={agentName(job.targetAgentKey)} onToggle={() => toggle(job)} onDelete={() => remove(job)} />
+            ))}
+          </div>
+        )}
+      </div>
+      {/* Right: scheduling assistant chat */}
+      <div className="flex min-h-0 min-w-0 flex-1">
+        <BuildChat
+          title=""
+          placeholder="e.g. every weekday at 9am, ask for a news digest"
+          empty="Tell me when and what to run — I'll set up the schedule."
+          messages={messages}
+          building={sending}
+          busyLabel="scheduling…"
+          onSend={send}
+          mentionAgents={runtime?.agents ?? []}
+        />
       </div>
     </div>
   )

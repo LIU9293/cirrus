@@ -2,6 +2,7 @@ import type {
   AuthUser,
   BotPlatform,
   CreationPhase,
+  CronJob,
   DeveloperChatMessage,
   MiniappDraft,
   MiniappRecord,
@@ -449,6 +450,57 @@ export async function sendRuntimeChat(
 
 export async function* streamRuntimeChat(id: string, history: ChatTurn[], signal?: AbortSignal): AsyncGenerator<AgentEvent> {
   const res = await fetch(`/api/runtimes/${id}/chat?stream=1`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify({ history }),
+    signal,
+  })
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+  yield* streamEvents(res)
+}
+
+// ── Cron jobs ──
+export async function listRuntimeCron(id: string): Promise<CronJob[]> {
+  const data = await json<{ jobs: CronJob[] }>(await fetch(`/api/runtimes/${id}/cron`))
+  return data.jobs
+}
+
+export interface CronJobInput {
+  name?: string
+  schedule: string
+  message: string
+  targetAgentKey?: string | null
+  enabled?: boolean
+}
+
+export async function createRuntimeCron(id: string, input: CronJobInput): Promise<CronJob> {
+  const data = await json<{ job: CronJob }>(
+    await fetch(`/api/runtimes/${id}/cron`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }),
+  )
+  return data.job
+}
+
+export async function updateRuntimeCron(id: string, jobId: string, patch: Partial<CronJobInput>): Promise<CronJob> {
+  const data = await json<{ job: CronJob }>(
+    await fetch(`/api/runtimes/${id}/cron/${jobId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  )
+  return data.job
+}
+
+export async function deleteRuntimeCron(id: string, jobId: string): Promise<void> {
+  await json<{ ok: boolean }>(await fetch(`/api/runtimes/${id}/cron/${jobId}`, { method: 'DELETE' }))
+}
+
+export async function* streamRuntimeCronChat(id: string, history: ChatTurn[], signal?: AbortSignal): AsyncGenerator<AgentEvent> {
+  const res = await fetch(`/api/runtimes/${id}/cron/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
     body: JSON.stringify({ history }),

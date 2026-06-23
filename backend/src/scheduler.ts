@@ -3,6 +3,9 @@ import { config } from './config.ts'
 import { listAllRecords, loadRecord, saveRecord } from './store.ts'
 import { runInboxTriage } from './apps/inboxTriage.ts'
 import { listAgentTree } from './agentfs.ts'
+import { listDueCronJobs, markCronJobRun } from './cronStore.ts'
+import { loadRuntime } from './runtimeStore.ts'
+import { executeRuntimeTurn } from './agent/runtimeTurn.ts'
 
 // Durable trigger scheduler, backed by pg-boss (Postgres job queue). A cron job
 // fires the tick every minute; pg-boss hands it to exactly ONE worker across all
@@ -21,7 +24,40 @@ function frequencyToMs(freq: unknown): number {
   return 3600_000 // default: hourly ("0 * * * *")
 }
 
+/** Fire every cron job whose schedule matches this minute, by injecting its
+ *  message into the runtime chat pipeline exactly like a user-typed turn. */
+async function runDueCronJobs(now: Date): Promise<void> {
+  let due
+  try {
+    due = await listDueCronJobs(now)
+  } catch (err) {
+    console.log(`[scheduler] cron scan failed: ${String((err as Error)?.message ?? err)}`)
+    return
+  }
+  for (const job of due) {
+    const at = new Date()
+    try {
+      const runtime = await loadRuntime(job.runtimeId)
+      if (!runtime) {
+        await markCronJobRun(job.id, at, 'runtime missing')
+        continue
+      }
+      const { message } = await executeRuntimeTurn(runtime, [{ role: 'user', content: job.message }], {
+        targetAgentKey: job.targetAgentKey ?? undefined,
+        persist: true,
+        idPrefix: 'cron',
+      })
+      await markCronJobRun(job.id, at, message || 'ran')
+      console.log(`[scheduler] cron "${job.name || job.id}" fired in ${job.runtimeId}`)
+    } catch (err) {
+      await markCronJobRun(job.id, at, `error: ${String((err as Error)?.message ?? err)}`).catch(() => {})
+      console.log(`[scheduler] cron ${job.id} failed: ${String((err as Error)?.message ?? err)}`)
+    }
+  }
+}
+
 async function tick(): Promise<void> {
+  await runDueCronJobs(new Date())
   const now = Date.now()
   for (const summary of await listAllRecords()) {
     const sched = (summary.skills ?? []).find((s) => s.platformSkillId === 'schedule' && s.status === 'active')

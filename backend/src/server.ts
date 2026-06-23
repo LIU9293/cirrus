@@ -10,12 +10,13 @@ import { runDeveloperAgent, type ChatTurn, type AgentEvent } from './agent/devel
 import {
   decideCirrusRuntimeRouting,
   describeCirrusRuntimeAgentSpecsForRuntime,
-  routeCirrusRuntimeMessage,
-  runCirrusRuntimeCommunityChat,
-  runCirrusRuntimeCoordinatorChat,
   runCirrusRuntimeAction,
   runCirrusRuntimeChat,
 } from './agent/cirrusRuntimeAgent.ts'
+import { executeRuntimeTurn, installRuntimeCommunityAgents } from './agent/runtimeTurn.ts'
+import { runCronAssistant } from './agent/cronAssistant.ts'
+import { listCronJobs, getCronJob, createCronJob, updateCronJob, deleteCronJob } from './cronStore.ts'
+import { isValidCron } from './cron.ts'
 import { resolveCanvasScreenshot } from './canvasScreenshot.ts'
 import { PLATFORM_SKILLS } from './skills/library.ts'
 import { resolveSkillSettings, writeSkillSettings, settingsFilled, declaredSettings, skillBindingKey, type SkillBindingContext } from './skills/settings.ts'
@@ -26,7 +27,7 @@ import { getSandboxDriver } from './sandbox/index.ts'
 import { createRuntime, deleteRuntime, listRuntimes, listAllRuntimes, loadRuntime, saveRuntime } from './runtimeStore.ts'
 import { getRuntimeSandboxStatus, provisionRuntimeSandbox } from './sandbox/runtimeSandbox.ts'
 import { startScheduler } from './scheduler.ts'
-import { installCommunityAgentInSandbox, normalizeRuntimeAgentRef } from './communityAgents.ts'
+import { normalizeRuntimeAgentRef } from './communityAgents.ts'
 import { clarifyConcept } from './define/clarify.ts'
 import { loadDataset, queryDataset, listTables } from './datastore/load.ts'
 import { diagnoseRuntimeGmail, diagnoseRuntimeNetwork } from './runtimeDiagnostics.ts'
@@ -491,41 +492,6 @@ async function refreshRuntimeStatus(runtime: RuntimeRecord): Promise<RuntimeReco
   return next
 }
 
-async function installRuntimeCommunityAgents(runtime: RuntimeRecord): Promise<RuntimeRecord> {
-  if (runtime.sandboxKind !== 'e2b' || !runtime.sandboxId) return runtime
-  let changed = false
-  const originalAgents = runtime.agents.map(normalizeRuntimeAgentRef)
-  const agents: RuntimeAgentRef[] = []
-  for (const agent of originalAgents) {
-    if (agent.source !== 'community') {
-      agents.push(agent)
-      continue
-    }
-    if (agent.installation?.status === 'ready') {
-      agents.push(agent)
-      continue
-    }
-    changed = true
-    const installing: RuntimeAgentRef = {
-      ...agent,
-      installation: {
-        ...agent.installation,
-        status: 'installing',
-        logs: [`${new Date().toISOString()} install queued`, ...(agent.installation?.logs ?? [])].slice(0, 8),
-      },
-    }
-    agents.push(installing)
-    runtime.agents = agents.concat(originalAgents.slice(agents.length))
-    await saveRuntime(runtime)
-    const installed = await installCommunityAgentInSandbox(runtime.sandboxId, installing)
-    agents[agents.length - 1] = installed
-  }
-  if (!changed) return runtime
-  runtime.agents = agents
-  await saveRuntime(runtime)
-  return runtime
-}
-
 app.get('/api/runtimes', async (req, res) => {
   const runtimes = await Promise.all((await listRuntimes(req.userId!)).map(refreshRuntimeStatus))
   res.json({ runtimes: runtimes.map(publicRuntime) })
@@ -631,8 +597,7 @@ app.delete('/api/runtimes/:id', async (req, res) => {
 // runtimes first pass through CirrusRuntimeAgent for a lightweight routing /
 // coordination decision, then hand off to the selected own or community agent.
 app.post('/api/runtimes/:id/chat', async (req, res) => {
-  const startedAt = Date.now()
-  let runtime = await loadRuntime(req.params.id)
+  const runtime = await loadRuntime(req.params.id)
   if (!runtime) return res.status(404).json({ error: 'not found' })
   const wantsStream = req.query.stream === '1' || String(req.headers.accept ?? '').includes('text/event-stream')
   const emit = (event: AgentEvent) => {
@@ -645,75 +610,9 @@ app.post('/api/runtimes/:id/chat', async (req, res) => {
     res.flushHeaders?.()
     emit({ type: 'status', text: 'Working with CirrusRuntimeAgent…' })
   }
-  if (runtime.sandboxKind === 'e2b' && runtime.sandboxId && runtime.agents.some((agent) => agent.source === 'community' && agent.installation?.status !== 'ready')) {
-    runtime = await installRuntimeCommunityAgents(runtime)
-  }
+
   const history = (req.body?.history ?? []) as ChatTurn[]
-
-  const ownRecordsByMiniappId = new Map<string, MiniappRecord>()
-  for (const agent of runtime.agents) {
-    if (agent.source !== 'own' || !agent.miniappId) continue
-    const record = await loadRecord(agent.miniappId)
-    if (record) ownRecordsByMiniappId.set(agent.miniappId, record)
-  }
-  const routing = decideCirrusRuntimeRouting(runtime.agents.length)
-  const agentSpecs = describeCirrusRuntimeAgentSpecsForRuntime(runtime.agents, ownRecordsByMiniappId)
-  const route = routing.mode === 'direct' ? routeCirrusRuntimeMessage(history, agentSpecs.slice(0, 1)) : routeCirrusRuntimeMessage(history, agentSpecs)
-  const selectedAgent = route.targetAgentKey ? runtime.agents.find((agent) => agent.key === route.targetAgentKey) : null
-  const selectedRecord = selectedAgent?.source === 'own' && selectedAgent.miniappId ? ownRecordsByMiniappId.get(selectedAgent.miniappId) : null
-  const sandboxId = runtime.sandboxKind === 'e2b' ? runtime.sandboxId : null
-
-  let message: string
-  let activities: DeveloperChatMessage['activities'] = []
-  if (selectedRecord) {
-    // A built own-agent: drive its real runtime agent (skills + soul). When the
-    // runtime has an E2B sandbox, the model/tool-choice loop runs there and the
-    // host only brokers declared tools + persistence.
-    const outcome = await runCirrusRuntimeChat(selectedRecord, history, {
-      sandboxId,
-      routing,
-      agentSpecs,
-      route,
-      binding: { runtimeId: runtime.id, agentKey: selectedAgent!.key },
-    })
-    message = outcome.message
-    activities = outcome.activities ?? []
-  } else if (selectedAgent?.source === 'community') {
-    const outcome = await runCirrusRuntimeCommunityChat(selectedAgent, history, {
-      sandboxId,
-      routing,
-      agentSpecs,
-      route,
-    })
-    message = outcome.message
-    activities = outcome.activities ?? []
-  } else if (runtime.agents.length > 0) {
-    const outcome = await runCirrusRuntimeCoordinatorChat(history, {
-      sandboxId,
-      routing,
-      agentSpecs,
-      route,
-    })
-    message = outcome.message
-    activities = outcome.activities ?? []
-  } else {
-    // No sandbox yet (still provisioning, or local fallback).
-    const names = runtime.agents.map((a) => a.name).join(', ')
-    message =
-      runtime.status === 'provisioning'
-        ? `The sandbox for ${names} is still starting up — try again in a moment.`
-        : `This runtime hosts ${names}, but no E2B sandbox is available (running locally).`
-  }
-
-  // Persist the exchange on the runtime record.
-  const userTurn = history.at(-1)
-  const now = Date.now()
-  const durationMs = now - startedAt
-  if (userTurn?.role === 'user') {
-    runtime.messages.push({ id: 'm-' + now.toString(36), role: 'user', content: userTurn.content })
-  }
-  runtime.messages.push({ id: 'a-' + now.toString(36), role: 'assistant', content: message, durationMs, activities })
-  await saveRuntime(runtime)
+  const { message, activities, durationMs } = await executeRuntimeTurn(runtime, history, { persist: true })
 
   if (wantsStream) {
     for (const activity of activities) emit(activityToEvent(activity))
@@ -725,6 +624,87 @@ app.post('/api/runtimes/:id/chat', async (req, res) => {
   }
 
   res.json({ ok: true, message, activities, durationMs })
+})
+
+// ── Cron jobs: scheduled tasks that message a runtime agent on a schedule ──
+app.get('/api/runtimes/:id/cron', async (req, res) => {
+  const runtime = await loadRuntime(req.params.id)
+  if (!runtime) return res.status(404).json({ error: 'not found' })
+  res.json({ jobs: await listCronJobs(runtime.id) })
+})
+
+app.post('/api/runtimes/:id/cron', async (req, res) => {
+  const runtime = await loadRuntime(req.params.id)
+  if (!runtime) return res.status(404).json({ error: 'not found' })
+  const b = req.body ?? {}
+  if (!isValidCron(String(b.schedule ?? ''))) return res.status(400).json({ error: 'Invalid cron schedule.' })
+  if (!String(b.message ?? '').trim()) return res.status(400).json({ error: 'message is required.' })
+  const targetAgentKey = b.targetAgentKey ? String(b.targetAgentKey) : null
+  if (targetAgentKey && !runtime.agents.some((a) => a.key === targetAgentKey)) return res.status(400).json({ error: 'unknown targetAgentKey.' })
+  try {
+    const job = await createCronJob({
+      runtimeId: runtime.id,
+      ownerId: runtime.ownerId,
+      name: String(b.name ?? ''),
+      schedule: String(b.schedule),
+      message: String(b.message),
+      targetAgentKey,
+      enabled: b.enabled !== undefined ? Boolean(b.enabled) : true,
+    })
+    res.json({ job })
+  } catch (err) {
+    res.status(400).json({ error: String((err as Error)?.message ?? err) })
+  }
+})
+
+app.patch('/api/runtimes/:id/cron/:jobId', async (req, res) => {
+  const runtime = await loadRuntime(req.params.id)
+  if (!runtime) return res.status(404).json({ error: 'not found' })
+  const existing = await getCronJob(req.params.jobId)
+  if (!existing || existing.runtimeId !== runtime.id) return res.status(404).json({ error: 'cron job not found' })
+  const b = req.body ?? {}
+  if (b.targetAgentKey && !runtime.agents.some((a) => a.key === String(b.targetAgentKey))) return res.status(400).json({ error: 'unknown targetAgentKey.' })
+  try {
+    const job = await updateCronJob(req.params.jobId, {
+      name: b.name !== undefined ? String(b.name) : undefined,
+      schedule: b.schedule !== undefined ? String(b.schedule) : undefined,
+      message: b.message !== undefined ? String(b.message) : undefined,
+      targetAgentKey: b.targetAgentKey !== undefined ? (b.targetAgentKey ? String(b.targetAgentKey) : null) : undefined,
+      enabled: b.enabled !== undefined ? Boolean(b.enabled) : undefined,
+    })
+    res.json({ job })
+  } catch (err) {
+    res.status(400).json({ error: String((err as Error)?.message ?? err) })
+  }
+})
+
+app.delete('/api/runtimes/:id/cron/:jobId', async (req, res) => {
+  const runtime = await loadRuntime(req.params.id)
+  if (!runtime) return res.status(404).json({ error: 'not found' })
+  const existing = await getCronJob(req.params.jobId)
+  if (!existing || existing.runtimeId !== runtime.id) return res.status(404).json({ error: 'cron job not found' })
+  await deleteCronJob(req.params.jobId)
+  res.json({ ok: true })
+})
+
+// Chat with the scheduling assistant, which manages this runtime's cron jobs via tools.
+app.post('/api/runtimes/:id/cron/chat', async (req, res) => {
+  const runtime = await loadRuntime(req.params.id)
+  if (!runtime) return res.status(404).json({ error: 'not found' })
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.flushHeaders?.()
+  const emit = (event: AgentEvent) => { res.write(`data: ${JSON.stringify(event)}\n\n`) }
+  const history = (req.body?.history ?? []) as ChatTurn[]
+  try {
+    await runCronAssistant(runtime, history, emit)
+  } catch (err) {
+    emit({ type: 'error', message: String((err as Error)?.message ?? err) })
+    emit({ type: 'done' })
+  }
+  res.write('data: [DONE]\n\n')
+  res.end()
 })
 
 app.post('/api/runtimes/:id/agents', async (req, res) => {

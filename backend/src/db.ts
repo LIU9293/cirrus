@@ -91,6 +91,23 @@ create table if not exists runtime_files (
   updated_at timestamptz not null default now(),
   primary key (runtime_id, path)
 );
+
+create table if not exists cron_jobs (
+  id               text primary key,
+  runtime_id       text not null references runtimes(id) on delete cascade,
+  owner_id         text not null,
+  name             text not null default '',
+  schedule         text not null,          -- 5-field cron expression
+  message          text not null,          -- delivered to the agent on each run
+  target_agent_key text,                   -- RuntimeAgentRef.key, or null to route
+  enabled          boolean not null default true,
+  last_run_at      timestamptz,
+  last_run_status  text,
+  next_run_at      timestamptz,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+create index if not exists cron_jobs_runtime_idx on cron_jobs(runtime_id);
 `
 
 let initialized = false

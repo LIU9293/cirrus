@@ -441,3 +441,26 @@ export interface RuntimeRecord {
   createdAt: string
   updatedAt: string
 }
+
+/** A scheduled task: on its cron schedule, `message` is sent to an agent in the
+ *  runtime exactly as if a user typed it into the runtime chat. */
+export interface CronJob {
+  id: string
+  runtimeId: string
+  ownerId: string
+  /** Short human label for the job. */
+  name: string
+  /** Standard 5-field cron expression (minute hour day-of-month month day-of-week). */
+  schedule: string
+  /** The message delivered to the agent when the job fires. */
+  message: string
+  /** Which agent to address (RuntimeAgentRef.key). Null = let the runtime route it. */
+  targetAgentKey?: string | null
+  enabled: boolean
+  lastRunAt?: string | null
+  /** Outcome summary of the most recent run (assistant reply, truncated). */
+  lastRunStatus?: string | null
+  nextRunAt?: string | null
+  createdAt: string
+  updatedAt: string
+}
