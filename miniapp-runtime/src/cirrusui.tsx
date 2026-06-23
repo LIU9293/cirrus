@@ -48,13 +48,35 @@ function bridge(): CirrusUIBridge | undefined {
  * Subscribe to the host-owned state model. Re-renders whenever the host pushes a
  * new state. The generic T is the shape declared in the miniapp manifest's stateModel.
  */
+const EMPTY_STATE: Record<string, unknown> = {}
+
+function shallowEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false
+  const ak = Object.keys(a as object)
+  const bk = Object.keys(b as object)
+  if (ak.length !== bk.length) return false
+  for (const k of ak) if ((a as Record<string, unknown>)[k] !== (b as Record<string, unknown>)[k]) return false
+  return true
+}
+
 export function useCirrusState<T = Record<string, unknown>>(): T {
+  const cacheRef = useRef<T>(EMPTY_STATE as T)
   const subscribe = useCallback((onChange: () => void) => {
     const ui = bridge()
     if (!ui) return () => {}
     return ui.subscribe(() => onChange())
   }, [])
-  const getSnapshot = useCallback(() => (bridge()?.getState() ?? {}) as T, [])
+  // useSyncExternalStore requires a referentially stable snapshot. The host may
+  // hand back a fresh object (or nothing) each call, so cache and reuse the last
+  // value whenever it's shallow-equal — otherwise React sees the snapshot change
+  // every render and loops forever (Minified React error #185).
+  const getSnapshot = useCallback(() => {
+    const next = (bridge()?.getState() ?? EMPTY_STATE) as T
+    if (shallowEqual(cacheRef.current, next)) return cacheRef.current
+    cacheRef.current = next
+    return next
+  }, [])
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 

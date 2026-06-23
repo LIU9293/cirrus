@@ -15,7 +15,6 @@ import {
   submitCanvasScreenshotResponse,
   streamChat,
   getAuth,
-  devLogin,
   logout,
   googleLoginUrl,
   type AuthInfo,
@@ -32,6 +31,8 @@ import { AgentPage } from '@/pages/AgentPage'
 import { CommunityAgentsPage } from '@/pages/CommunityAgentsPage'
 import { RuntimePage } from '@/pages/RuntimePage'
 import { CardNav, type CardNavItem } from '@/components/CardNav'
+import { MotionAccordion } from '@/components/unlumen-ui/motion-faqs-accordion'
+import DotGrid from '@/components/react-bits/DotGrid'
 
 export type StudioMode = 'dev' | 'live'
 
@@ -83,11 +84,17 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    if (window.location.pathname === '/') return
     const normalized = ROUTES[viewFromPath(window.location.pathname)]
     if (window.location.pathname !== normalized) {
       window.history.replaceState({}, '', normalized)
     }
   }, [])
+
+  useEffect(() => {
+    if (!auth?.user || window.location.pathname !== '/') return
+    navigate('agents', true)
+  }, [auth?.user, navigate])
 
   useEffect(() => {
     if (view !== 'flow') setAgentFlowNav(null)
@@ -429,7 +436,7 @@ export function App() {
     return <div className="dot-bg grid h-full w-full place-items-center text-sm text-muted-foreground">Loading…</div>
   }
   if (!auth.user) {
-    return <LoginScreen info={auth} onSignedIn={(user) => setAuth({ ...auth, user })} />
+    return <LoginScreen />
   }
 
   // Top-level navigation (URL routes: /agent, /community, /runtime, /new; / redirects to /agent).
@@ -480,60 +487,50 @@ export function App() {
 
 }
 
-/** Sign-in screen. Uses Google OAuth when configured, else the dev email fallback. */
-function LoginScreen({ info, onSignedIn }: { info: AuthInfo; onSignedIn: (user: AuthUser) => void }) {
-  const [email, setEmail] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const signInDev = async () => {
-    if (!email.includes('@') || busy) return
-    setBusy(true)
-    setError(null)
-    try {
-      onSignedIn(await devLogin(email.trim()))
-    } catch (err) {
-      setError(String((err as Error)?.message ?? err))
-      setBusy(false)
-    }
-  }
+const loginFaqs = [
+  {
+    question: '什么是 Cirrus？',
+    answer: 'Cirrus 是一个创建、分享以及运行 Agent 的环境。',
+  },
+  {
+    question: '为什么要用 Cirrus？',
+    answer:
+      '我们的 Agent 可能散落在不同的项目中，Cirrus 希望帮你更好地管理你的 Agent，同时可以发现社区优秀的 Agent 并直接使用。',
+  },
+  {
+    question: 'Agent 跑在哪里？',
+    answer:
+      'Cirrus 提供方便的云端沙箱环境让你一键跑 Agent，你可以直接在网页上和 Agent 对话，或者通过 Chatbot/API 来使用 Agent。',
+  },
+  {
+    question: '在 Cirrus 上 Agent 可以长久运行么？',
+    answer:
+      'Cirrus 会自动暂停空闲的 Agent 来减少资源消耗，但只要你开始对话或有任务触发，Agent 会自动恢复，所有记忆/环境会持久保存。',
+  },
+  {
+    question: '什么是 miniapp？',
+    answer:
+      '通过 Cirrus 创建的 Agent 还可以提供创建 miniapp 的能力，miniapp 可以是一个完整的 webapp。你可以开发任何想要的 web 功能，可以是针对 Agent 的看板，也可以是一个独立的网站，这时候 Agent 会成为集成在你产品中的智能助理。',
+  },
+]
+
+function LoginScreen() {
   return (
-    <div className="dot-bg grid h-full w-full place-items-center p-6">
-      <div className="relative z-[1] w-full max-w-[360px] rounded-[18px] border border-border bg-surface p-7 shadow-[0_24px_60px_-20px_rgba(25,25,23,0.25)]">
-        <div className="text-[20px] font-bold tracking-tight text-ink">Cirrus Studio</div>
-        <div className="mt-1 text-[13px] text-ink-secondary">Sign in to access your agents and runtimes.</div>
-        {info.googleAuth && (
-          <a
-            href={googleLoginUrl}
-            className="mt-5 flex h-10 w-full items-center justify-center gap-2 rounded-[10px] border border-border-strong bg-white text-[13.5px] font-semibold text-ink hover:bg-surface-muted"
-          >
-            Continue with Google
-          </a>
-        )}
-        {info.devAuth && (
-          <div className="mt-5">
-            {info.googleAuth && <div className="mb-3 text-center text-[11px] uppercase tracking-wide text-ink-tertiary">or dev sign-in</div>}
-            <input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') void signInDev() }}
-              type="email"
-              placeholder="you@example.com"
-              className="h-10 w-full rounded-[10px] border border-border-strong bg-white/80 px-3 text-[13.5px] text-ink outline-none focus:border-primary"
-            />
-            <button
-              onClick={() => void signInDev()}
-              disabled={busy || !email.includes('@')}
-              className="mt-2.5 h-10 w-full rounded-[10px] bg-primary text-[13.5px] font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-40"
-            >
-              {busy ? 'Signing in…' : 'Sign in'}
-            </button>
-            <div className="mt-2 text-[11px] text-ink-tertiary">
-              Dev mode — local email-only sign-in for development.
-            </div>
-          </div>
-        )}
-        {error && <div className="mt-3 text-[12px] text-red-600">{error}</div>}
+    <div className="relative min-h-full w-full overflow-y-auto bg-white px-5 py-8 sm:px-8 sm:py-12">
+      <div className="absolute inset-0 opacity-70">
+        <DotGrid />
       </div>
+      <main className="relative z-[1] mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-3xl flex-col justify-center">
+        <MotionAccordion items={loginFaqs} className="mx-auto w-full max-w-2xl" />
+
+        <a
+          href={googleLoginUrl}
+          className="mx-auto mt-7 flex h-11 w-full max-w-[280px] items-center justify-center gap-2 rounded-[10px] bg-white px-4 text-[14px] font-semibold text-ink shadow-xs transition hover:bg-surface-muted focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-2 focus:ring-offset-white"
+        >
+          <span className="grid size-5 place-items-center rounded-full bg-surface-muted text-[12px] font-bold text-ink">G</span>
+          使用 Google 登录
+        </a>
+      </main>
     </div>
   )
 }
