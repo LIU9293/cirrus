@@ -34,6 +34,7 @@ import { CardNav, type CardNavItem } from '@/components/CardNav'
 import { MotionAccordion } from '@/components/unlumen-ui/motion-faqs-accordion'
 import DotGrid from '@/components/react-bits/DotGrid'
 import { InteractiveHoverButton } from '@/components/magicui/interactive-hover-button'
+import { SquigglyText } from '@/components/ui/squiggly-text'
 
 export type StudioMode = 'dev' | 'live'
 
@@ -522,11 +523,17 @@ function LoginScreen() {
         <DotGrid />
       </div>
       <main className="relative z-[1] mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-3xl flex-col justify-center">
+        <h1 className="mb-9 text-center text-[44px] font-semibold leading-none tracking-normal text-ink sm:text-[60px]">
+          Meet{' '}
+          <SquigglyText className="text-primary" scale={[3, 5]} stepDuration={90}>
+            Cirrus
+          </SquigglyText>
+        </h1>
         <MotionAccordion items={loginFaqs} className="mx-auto w-full max-w-2xl" />
 
         <InteractiveHoverButton
           href={googleLoginUrl}
-          className="mx-auto mt-7 flex h-11 w-full max-w-[280px] items-center justify-center border-border/70 bg-white px-5 text-[14px] text-ink shadow-xs transition focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-2 focus:ring-offset-white"
+          className="mx-auto mt-7 h-10 border-border/70 bg-white px-5 text-[14px] text-ink shadow-xs transition focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-2 focus:ring-offset-white"
         >
           使用 Google 登录
         </InteractiveHoverButton>

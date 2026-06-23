@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence, type Variants } from 'motion/react'
 import {
@@ -3080,6 +3080,7 @@ function RuntimeWindow({
   const [showMiniapp, setShowMiniapp] = useState(false)
   const [messages, setMessages] = useState<UiMessage[]>([])
   const [sending, setSending] = useState(false)
+  const [loadingRuntime, setLoadingRuntime] = useState(true)
   const runtimeMiniappId = runtime?.agents.find((a) => a.source === 'own' && a.miniappId)?.miniappId ?? null
   const hasRuntimeMiniapp = !!miniapp?.html
 
@@ -3087,6 +3088,7 @@ function RuntimeWindow({
   useEffect(() => {
     let alive = true
     setRuntimeError(null)
+    setLoadingRuntime(true)
     void getRuntime(id)
       .then((rt) => {
         if (!alive) return
@@ -3096,6 +3098,9 @@ function RuntimeWindow({
       .catch((err) => {
         if (!alive) return
         setRuntimeError(String((err as Error)?.message ?? err))
+      })
+      .finally(() => {
+        if (alive) setLoadingRuntime(false)
       })
     return () => { alive = false }
   }, [id])
@@ -3416,6 +3421,7 @@ function RuntimeWindow({
                   empty="Say hello — this runtime's agents will respond."
                   messages={messages}
                   building={sending}
+                  loading={loadingRuntime}
                   onSend={send}
                   mentionAgents={runtime?.agents ?? []}
                 />
@@ -4562,6 +4568,7 @@ function BuildChat({
   messages,
   building,
   busyLabel = 'working...',
+  loading = false,
   onSend,
   attachmentLabel,
   onClearAttachment,
@@ -4573,6 +4580,7 @@ function BuildChat({
   messages: UiMessage[]
   building: boolean
   busyLabel?: string
+  loading?: boolean
   onSend?: (text: string) => void
   attachmentLabel?: string
   onClearAttachment?: () => void
@@ -4581,9 +4589,24 @@ function BuildChat({
   const [input, setInput] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const toBottom = useCallback(() => {
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [])
+  // Stick to the latest message as new ones stream in.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: 'end' })
-  }, [messages, building])
+    if (loading) return
+    const raf = requestAnimationFrame(toBottom)
+    return () => cancelAnimationFrame(raf)
+  }, [messages, building, loading, toBottom])
+  // After the initial load completes, force-scroll to the newest message. Retry
+  // across a few frames so async markdown/layout reflow doesn't strand us mid-list.
+  useEffect(() => {
+    if (loading) return
+    const timers = [0, 60, 160, 320].map((d) => window.setTimeout(toBottom, d))
+    return () => timers.forEach(clearTimeout)
+  }, [loading, toBottom])
   const send = () => {
     const t = input.trim()
     if (!t || building || !onSend) return
@@ -4612,9 +4635,15 @@ function BuildChat({
   return (
     <div className="flex h-full min-h-0 w-full flex-1 flex-col bg-white/40">
       {title && <div className="border-b border-black/5 px-4 py-2.5 text-[12px] font-semibold text-ink">{title}</div>}
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-        {messages.length === 0 && <div className="text-[12.5px] leading-relaxed text-ink-tertiary">{empty}</div>}
-        {messages.map((m, i) => (
+      <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+        {loading ? (
+          <div className="flex flex-1 items-center justify-center gap-2 text-[12.5px] text-ink-tertiary">
+            <Loader2 className="size-4 animate-spin" /> Loading chat…
+          </div>
+        ) : (
+          messages.length === 0 && <div className="text-[12.5px] leading-relaxed text-ink-tertiary">{empty}</div>
+        )}
+        {!loading && messages.map((m, i) => (
           <BuildMsg
             key={m.id}
             m={m}
