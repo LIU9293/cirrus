@@ -2136,10 +2136,12 @@ function AddToRuntimeDialog({
   agentRef,
   agentName,
   onClose,
+  onNavigateRuntime,
 }: {
   agentRef: RuntimeAgentRef
   agentName: string
   onClose: () => void
+  onNavigateRuntime?: () => void
 }) {
   const [runtimes, setRuntimes] = useState<RuntimeRecord[]>([])
   const [loading, setLoading] = useState(true)
@@ -2150,12 +2152,17 @@ function AddToRuntimeDialog({
     void listRuntimes().then(setRuntimes).catch(() => {}).finally(() => setLoading(false))
   }, [])
 
+  const finish = (msg: string) => {
+    setDone(msg)
+    // Navigating to the Runtimes page unmounts this dialog; fall back to closing.
+    setTimeout(() => (onNavigateRuntime ? onNavigateRuntime() : onClose()), 700)
+  }
+
   const addTo = async (rt: RuntimeRecord) => {
     setBusy(true)
     try {
       await addRuntimeAgent(rt.id, agentRef)
-      setDone(`Added to ${rt.name}.`)
-      setTimeout(onClose, 700)
+      finish(`Added to ${rt.name}.`)
     } finally {
       setBusy(false)
     }
@@ -2165,8 +2172,7 @@ function AddToRuntimeDialog({
     setBusy(true)
     try {
       await apiCreateRuntime(`${agentName} runtime`, [agentRef])
-      setDone('New runtime created.')
-      setTimeout(onClose, 700)
+      finish('New runtime created.')
     } finally {
       setBusy(false)
     }
@@ -2316,11 +2322,17 @@ function communityAgentRef(agent: CommunityAgent): RuntimeAgentRef {
   return { key: `community:${agent.name}`, name: agent.name, source: 'community' }
 }
 
-export function CommunityPage({ onNavigate: _onNavigate }: { onNavigate: (v: NavView) => void }) {
+export function CommunityPage({ onNavigate }: { onNavigate: (v: NavView) => void }) {
   const [usage, setUsage] = useState<Record<string, number>>({})
   useEffect(() => {
     void getCommunityUsage().then(setUsage)
   }, [])
+  // Masonry columns: each column is an independent flex stack, so expanding one
+  // card only grows its own column — other columns are untouched.
+  const lg = useMediaQuery('(min-width: 1024px)')
+  const sm = useMediaQuery('(min-width: 640px)')
+  const cols = lg ? 3 : sm ? 2 : 1
+  const columns = Array.from({ length: cols }, (_, c) => COMMUNITY.filter((_, i) => i % cols === c))
   return (
     <div className="dot-bg relative h-full w-full overflow-auto">
       <div className={PAGE_CONTAINER_CLASS}>
@@ -2328,9 +2340,13 @@ export function CommunityPage({ onNavigate: _onNavigate }: { onNavigate: (v: Nav
           <h1 className="text-[28px] font-bold tracking-tight text-ink">Community Agents</h1>
           <p className="mt-1.5 text-[13.5px] text-ink-secondary">Agents shared by the community — open one to explore or fork.</p>
         </div>
-        <div className={PAGE_GRID_CLASS}>
-          {COMMUNITY.map((a) => (
-            <CommunityAgentCard key={a.name} agent={a} usedIn={usage[`community:${a.name}`] ?? 0} />
+        <div className="flex items-start gap-4">
+          {columns.map((colItems, ci) => (
+            <div key={ci} className="flex min-w-0 flex-1 flex-col gap-4">
+              {colItems.map((a) => (
+                <CommunityAgentCard key={a.name} agent={a} usedIn={usage[`community:${a.name}`] ?? 0} onNavigate={onNavigate} />
+              ))}
+            </div>
           ))}
         </div>
       </div>
@@ -2338,7 +2354,7 @@ export function CommunityPage({ onNavigate: _onNavigate }: { onNavigate: (v: Nav
   )
 }
 
-function CommunityAgentCard({ agent, usedIn }: { agent: CommunityAgent; usedIn: number }) {
+function CommunityAgentCard({ agent, usedIn, onNavigate }: { agent: CommunityAgent; usedIn: number; onNavigate: (v: NavView) => void }) {
   const [addOpen, setAddOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const agentRef = communityAgentRef(agent)
@@ -2399,7 +2415,7 @@ function CommunityAgentCard({ agent, usedIn }: { agent: CommunityAgent; usedIn: 
 
       {addOpen &&
         createPortal(
-          <AddToRuntimeDialog agentRef={agentRef} agentName={agent.name} onClose={() => setAddOpen(false)} />,
+          <AddToRuntimeDialog agentRef={agentRef} agentName={agent.name} onClose={() => setAddOpen(false)} onNavigateRuntime={() => onNavigate('runtime')} />,
           document.body,
         )}
     </div>
@@ -3158,8 +3174,8 @@ function RuntimeWindow({
   const tabs: { key: 'chat' | 'bots' | 'details' | 'config'; label: string; icon: React.ReactNode; show: boolean }[] = [
     { key: 'chat', label: 'Chat', icon: <MessageSquare className="size-[15px]" />, show: true },
     { key: 'bots', label: 'Bots', icon: <Bot className="size-[15px]" />, show: true },
-    { key: 'details', label: 'Details', icon: <LayoutGrid className="size-[15px]" />, show: true },
     { key: 'config', label: 'Configuration', icon: <KeyRound className="size-[15px]" />, show: true },
+    { key: 'details', label: 'Details', icon: <LayoutGrid className="size-[15px]" />, show: true },
   ]
   const activeTab = tab
 
