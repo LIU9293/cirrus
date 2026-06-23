@@ -1088,7 +1088,7 @@ function GmailSkillDiagnostics({ appId, skill }: { appId: string; skill: Miniapp
   )
 }
 
-function DatabaseSkillDiagnostics({ appId }: { appId: string }) {
+function DatabaseSkillDiagnostics({ appId, embedded = false }: { appId: string; embedded?: boolean }) {
   const [busy, setBusy] = useState(false)
   const [tables, setTables] = useState<DatastoreTableInfo[]>([])
   const [samples, setSamples] = useState<Record<string, Record<string, unknown>[]>>({})
@@ -1118,12 +1118,12 @@ function DatabaseSkillDiagnostics({ appId }: { appId: string }) {
     void refresh()
   }, [appId])
 
-  return (
-    <div className="shrink-0 rounded-[12px] border border-border bg-surface p-3">
+  const body = (
+    <div className={embedded ? 'flex flex-col gap-3' : 'shrink-0 rounded-[12px] border border-border bg-surface p-3'}>
       <div className="flex items-center gap-2">
         <Database className="size-4 text-ink-secondary" />
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-semibold text-ink">Database tables</div>
+          {!embedded && <div className="text-[13px] font-semibold text-ink">Database tables</div>}
           <div className="mt-0.5 text-[11.5px] text-ink-tertiary">Shows persisted schemas, analysis rows, and operation logs.</div>
         </div>
         <button
@@ -1166,6 +1166,7 @@ function DatabaseSkillDiagnostics({ appId }: { appId: string }) {
       </div>
     </div>
   )
+  return body
 }
 
 function DatasetSkillLoader({
@@ -1223,16 +1224,15 @@ function DatasetSkillLoader({
   }
 
   return (
-    <div className="shrink-0 rounded-[12px] border border-border bg-surface p-3">
+    <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
         <Database className="size-4 text-ink-secondary" />
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-semibold text-ink">Agent dataset import</div>
-          <div className="mt-0.5 text-[11.5px] text-ink-tertiary">Give the agent a source and goal; it writes and runs the importer script.</div>
+          <div className="text-[12px] leading-relaxed text-ink-tertiary">Give the agent a source and goal; it writes and runs the importer script.</div>
         </div>
       </div>
       {loadedTable && (
-        <div className="mt-3 rounded-[10px] border border-black/5 bg-white/65 p-2.5">
+        <div className="rounded-[10px] border border-black/5 bg-white/65 p-2.5">
           <div className="font-mono text-[12px] font-semibold text-ink">{loadedTable} · {loadedRows ?? 0} rows</div>
           {!!schema.length && (
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -1245,7 +1245,7 @@ function DatasetSkillLoader({
           )}
         </div>
       )}
-      <div className="mt-3 flex flex-col gap-2">
+      <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex rounded-md bg-surface-muted p-0.5">
             {(['url', 'paste'] as const).map((mode) => (
@@ -1314,7 +1314,7 @@ function DatasetSkillLoader({
           />
         </label>
       </div>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => void importDataset()}
@@ -2104,18 +2104,38 @@ function SkillPanel({
                     </Collapsible>
                   </>
                 )}
-                {skill?.platformSkillId === 'database' && <DatabaseSkillDiagnostics appId={appId} />}
                 {skill?.platformSkillId === 'dataset_library' && (
-                  <DatasetSkillLoader
-                    appId={appId}
-                    skill={skill}
-                    onUpdate={(partial) =>
-                      onUpdateFlow({
-                        skills: (miniapp.skills ?? []).map((s) => (s.id === skill.id ? { ...s, ...partial } : s)),
-                      })
-                    }
-                  />
+                  <>
+                    <div className="pt-1 px-1 font-mono text-[10.5px] tracking-[0.12em] text-ink-tertiary">
+                      AGENT DATASET
+                    </div>
+                    <Collapsible
+                      title="Importer"
+                      meta={skill.config?.rowCount ? `${skill.config.rowCount} rows` : 'agent script'}
+                      open={section === 'dataset-import'}
+                      onToggle={() => setSection((s) => (s === 'dataset-import' ? '' : 'dataset-import'))}
+                    >
+                      <DatasetSkillLoader
+                        appId={appId}
+                        skill={skill}
+                        onUpdate={(partial) =>
+                          onUpdateFlow({
+                            skills: (miniapp.skills ?? []).map((s) => (s.id === skill.id ? { ...s, ...partial } : s)),
+                          })
+                        }
+                      />
+                    </Collapsible>
+                    <Collapsible
+                      title="Viewer"
+                      meta="tables"
+                      open={section === 'dataset-viewer'}
+                      onToggle={() => setSection((s) => (s === 'dataset-viewer' ? '' : 'dataset-viewer'))}
+                    >
+                      <DatabaseSkillDiagnostics appId={appId} embedded />
+                    </Collapsible>
+                  </>
                 )}
+                {skill?.platformSkillId === 'database' && <DatabaseSkillDiagnostics appId={appId} />}
               </>
             )}
           </div>
