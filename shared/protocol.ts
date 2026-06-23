@@ -372,7 +372,7 @@ export type RuntimeStatus =
   | 'error' // provisioning failed
   | 'stopped'
 
-export type BotPlatform = 'slack' | 'discord' | 'lark'
+export type BotPlatform = 'slack' | 'telegram' | 'lark'
 
 export interface RuntimeBot {
   id: string

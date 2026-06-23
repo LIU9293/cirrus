@@ -3052,7 +3052,7 @@ function AgentPickGroup({
 
 const BOT_OPTIONS: { platform: BotPlatform; label: string; icon: React.ReactNode; color: string; tokenLabel: string; tokenHint: string }[] = [
   { platform: 'slack', label: 'Slack', icon: <MessageSquare className="size-[15px]" />, color: '#4A154B', tokenLabel: 'Bot User OAuth Token', tokenHint: 'xoxb-…' },
-  { platform: 'discord', label: 'Discord', icon: <Bot className="size-[15px]" />, color: '#5865F2', tokenLabel: 'Bot Token', tokenHint: 'your Discord bot token' },
+  { platform: 'telegram', label: 'Telegram', icon: <Bot className="size-[15px]" />, color: '#229ED9', tokenLabel: 'Bot Token', tokenHint: '123456:ABC-DEF… from @BotFather' },
   { platform: 'lark', label: 'Lark', icon: <Bell className="size-[15px]" />, color: '#00D6B9', tokenLabel: 'App Secret', tokenHint: 'your Lark app secret' },
 ]
 
@@ -4390,7 +4390,7 @@ function BotsEmptyState({ onConnect }: { onConnect: () => void }) {
       <div>
         <div className="text-[16px] font-bold tracking-tight text-ink">No bots connected</div>
         <p className="mx-auto mt-1.5 max-w-[300px] text-[13px] leading-relaxed text-ink-secondary">
-          Connect Slack, Discord, or Lark so people can talk to this runtime right from their chat app.
+          Connect Slack, Telegram, or Lark so people can talk to this runtime right from their chat app.
         </p>
       </div>
       <button

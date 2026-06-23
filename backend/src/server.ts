@@ -473,7 +473,7 @@ app.post('/api/miniapps/:id/actions', async (req, res) => {
  * A Runtime is a running home for one or more agents, backed by a real E2B
  * sandbox. Users chat with the runtime, view a hosted miniapp, and connect bots. */
 
-const BOT_LABELS: Record<BotPlatform, string> = { slack: 'Slack', discord: 'Discord', lark: 'Lark' }
+const BOT_LABELS: Record<BotPlatform, string> = { slack: 'Slack', telegram: 'Telegram', lark: 'Lark' }
 
 // Never send stored bot tokens to the client; expose only `hasToken`.
 function publicRuntime(rt: RuntimeRecord): RuntimeRecord {
