@@ -175,16 +175,10 @@ export default function DotGrid({
 
   useEffect(() => {
     buildGrid()
-    let resizeObserver: ResizeObserver | null = null
-    if ('ResizeObserver' in window) {
-      resizeObserver = new ResizeObserver(buildGrid)
-      if (wrapperRef.current) resizeObserver.observe(wrapperRef.current)
-    } else {
-      window.addEventListener('resize', buildGrid)
-    }
+    const resizeObserver = new ResizeObserver(buildGrid)
+    if (wrapperRef.current) resizeObserver.observe(wrapperRef.current)
     return () => {
-      if (resizeObserver) resizeObserver.disconnect()
-      else window.removeEventListener('resize', buildGrid)
+      resizeObserver.disconnect()
     }
   }, [buildGrid])
 

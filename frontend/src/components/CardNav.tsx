@@ -190,7 +190,7 @@ export function CardNav({
     >
       <nav
         ref={navRef}
-        className={`card-nav relative block h-[60px] overflow-hidden rounded-[16px] border border-border bg-surface/95 p-0 shadow-[0_16px_44px_-24px_rgba(25,25,23,0.4)] backdrop-blur-xl will-change-[height] ${isExpanded ? 'open' : ''}`}
+        className={`card-nav relative block h-[60px] overflow-hidden rounded-[16px] border border-border bg-surface/95 p-0 shadow-[0_12px_36px_-26px_rgba(25,25,23,0.22)] backdrop-blur-xl will-change-[height] ${isExpanded ? 'open' : ''}`}
         style={{ backgroundColor: baseColor }}
       >
         <div className="card-nav-top absolute inset-x-0 top-0 z-[2] flex h-[60px] items-center justify-between px-2.5 py-2 sm:pl-4">

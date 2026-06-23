@@ -33,6 +33,7 @@ import { RuntimePage } from '@/pages/RuntimePage'
 import { CardNav, type CardNavItem } from '@/components/CardNav'
 import { MotionAccordion } from '@/components/unlumen-ui/motion-faqs-accordion'
 import DotGrid from '@/components/react-bits/DotGrid'
+import { InteractiveHoverButton } from '@/components/magicui/interactive-hover-button'
 
 export type StudioMode = 'dev' | 'live'
 
@@ -523,13 +524,12 @@ function LoginScreen() {
       <main className="relative z-[1] mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-3xl flex-col justify-center">
         <MotionAccordion items={loginFaqs} className="mx-auto w-full max-w-2xl" />
 
-        <a
+        <InteractiveHoverButton
           href={googleLoginUrl}
-          className="mx-auto mt-7 flex h-11 w-full max-w-[280px] items-center justify-center gap-2 rounded-[10px] bg-white px-4 text-[14px] font-semibold text-ink shadow-xs transition hover:bg-surface-muted focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-2 focus:ring-offset-white"
+          className="mx-auto mt-7 flex h-11 w-full max-w-[280px] items-center justify-center border-border/70 bg-white px-5 text-[14px] text-ink shadow-xs transition focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-2 focus:ring-offset-white"
         >
-          <span className="grid size-5 place-items-center rounded-full bg-surface-muted text-[12px] font-bold text-ink">G</span>
           使用 Google 登录
-        </a>
+        </InteractiveHoverButton>
       </main>
     </div>
   )

@@ -3300,7 +3300,7 @@ function RuntimeWindow({
           // fully opaque to stop the dark bleeding through and graying the UI.
           ...(max
             ? { background: 'var(--surface)' }
-            : { background: 'rgba(255,255,255,0.82)', backdropFilter: 'blur(26px)', WebkitBackdropFilter: 'blur(26px)' }),
+            : { background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(26px)', WebkitBackdropFilter: 'blur(26px)' }),
         }}
       >
         {/* Title bar — drag anywhere (windowed mode) */}

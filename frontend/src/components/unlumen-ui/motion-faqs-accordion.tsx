@@ -45,7 +45,7 @@ function AccordionItem({
   return (
     <motion.div
       layout
-      className="overflow-hidden rounded-[30px] border-none bg-surface-muted text-foreground shadow-xs"
+      className="overflow-hidden rounded-[24px] border-none bg-surface-muted text-foreground shadow-xs"
       transition={{ type: 'spring', stiffness: 280, damping: 28, mass: 0.9 }}
       animate={{ scale: isOpen ? 1 : 0.985 }}
       initial={false}
@@ -57,7 +57,7 @@ function AccordionItem({
         aria-controls={panelId}
         aria-expanded={isOpen}
         onClick={onToggle}
-        className="flex w-full cursor-pointer select-none items-center justify-between gap-4 px-5 py-4 text-left sm:px-7 sm:py-5"
+        className="flex w-full cursor-pointer select-none items-center justify-between gap-4 px-5 py-3.5 text-left sm:px-6 sm:py-4"
       >
         <span className="text-[16px] font-medium leading-snug text-ink sm:text-[18px]">{item.question}</span>
         <motion.span
@@ -65,7 +65,7 @@ function AccordionItem({
           initial={false}
           animate={{ rotate: isOpen ? 180 : 0, scale: isOpen ? 1.05 : 1 }}
           transition={{ type: 'spring', stiffness: 480, damping: 28 }}
-          className="inline-flex size-10 shrink-0 items-center justify-center rounded-full text-ink sm:size-12"
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-ink sm:size-10"
         >
           {isOpen ? <Minus className="size-4" /> : <Plus className="size-4" />}
         </motion.span>
@@ -86,7 +86,7 @@ function AccordionItem({
           ref={contentRef}
           animate={{ y: isOpen ? 0 : -8 }}
           transition={{ type: 'spring', stiffness: 360, damping: 30, mass: 0.8 }}
-          className="px-5 pb-5 sm:px-7 sm:pb-7"
+          className="px-5 pb-4 sm:px-6 sm:pb-5"
         >
           <p className="text-[15px] leading-7 text-ink-secondary sm:text-[17px] sm:leading-8">{item.answer}</p>
         </motion.div>
@@ -95,7 +95,7 @@ function AccordionItem({
   )
 }
 
-export function MotionAccordion({ items, gap = 10, className }: MotionAccordionProps) {
+export function MotionAccordion({ items, gap = 8, className }: MotionAccordionProps) {
   const rawId = React.useId()
   const baseId = `accordion-${rawId.replace(/:/g, '')}`
   const [openIndex, setOpenIndex] = React.useState<number | null>(null)
@@ -104,7 +104,7 @@ export function MotionAccordion({ items, gap = 10, className }: MotionAccordionP
 
   return (
     <div className={cn('w-full', className)}>
-      <div className="flex flex-col rounded-[28px] p-2 sm:p-3" style={{ gap }}>
+      <div className="flex flex-col rounded-[24px] p-2" style={{ gap }}>
         {items.map((item, index) => (
           <AccordionItem
             key={index}
