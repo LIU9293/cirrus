@@ -350,7 +350,7 @@ export function App() {
             }
           : {}),
       }
-      const asstMsg: UiMessage = { id: nextId(), role: 'assistant', content: '', activities: [] }
+      const asstMsg: UiMessage = { id: nextId(), role: 'assistant', content: '', activities: [{ kind: 'status', text: 'Preparing Mini App builder…' }] }
       const priorTurns: ChatTurn[] = messagesRef.current
         .filter((m) => (m.agentContent ?? m.content).trim())
         .map((m) => ({ role: m.role, content: m.agentContent ?? m.content }))
@@ -723,7 +723,13 @@ function applyEvent(messages: UiMessage[], asstId: string, ev: AgentEvent): UiMe
     const activities = m.activities ? [...m.activities] : []
     switch (ev.type) {
       case 'status':
-        activities.push({ kind: 'status', text: ev.text })
+        if (ev.text.startsWith('Still working…')) {
+          const previous = activities.findIndex((activity) => activity.kind === 'status' && activity.text.startsWith('Still working…'))
+          if (previous >= 0) activities[previous] = { kind: 'status', text: ev.text }
+          else activities.push({ kind: 'status', text: ev.text })
+        } else {
+          activities.push({ kind: 'status', text: ev.text })
+        }
         return { ...m, activities }
       case 'assistant':
         return { ...m, content: m.content ? `${m.content}\n\n${ev.text}` : ev.text }

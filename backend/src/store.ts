@@ -101,6 +101,12 @@ export async function listAllRecords(): Promise<MiniappRecord[]> {
   return rows.map(rowToRecord)
 }
 
+/** Public ("published") miniapps across all users — for the community page. */
+export async function listPublishedRecords(): Promise<MiniappRecord[]> {
+  const { rows } = await query<MiniappRow>("select * from miniapps where data->>'visibility' = 'public' order by updated_at desc")
+  return rows.map(rowToRecord)
+}
+
 export async function deleteMiniapp(id: string): Promise<boolean> {
   const { rowCount } = await query('delete from miniapps where id = $1', [id]) // cascades miniapp_files
   return rowCount > 0

@@ -111,6 +111,27 @@ export async function listMiniapps(): Promise<(MiniappRecord & { hasHtml: boolea
   return data.miniapps
 }
 
+/** Rename an agent and/or change its community visibility. */
+export async function updateMiniappSettings(id: string, patch: { name?: string; visibility?: 'private' | 'public' }): Promise<void> {
+  await json(await fetch(`/api/miniapps/${id}/settings`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  }))
+}
+
+export interface PublishedAgent { id: string; name: string; description: string }
+
+/** Public, user-built agents shown on the community page (after the hardcoded ones). */
+export async function listPublishedAgents(): Promise<PublishedAgent[]> {
+  try {
+    const data = await json<{ agents: PublishedAgent[] }>(await fetch('/api/community/published', { credentials: 'include' }))
+    return data.agents ?? []
+  } catch {
+    return []
+  }
+}
+
 export async function createMiniapp(): Promise<MiniappRecord> {
   const data = await json<{ miniapp: MiniappRecord }>(await fetch('/api/miniapps', { method: 'POST' }))
   return data.miniapp
@@ -162,7 +183,19 @@ export interface DatastoreTableInfo {
 
 export async function loadDataset(
   id: string,
-  input: { skillId: string; format: 'json' | 'csv'; text: string; table?: string },
+  input: {
+    skillId: string
+    format: 'json' | 'csv' | 'text'
+    text?: string
+    url?: string
+    table?: string
+    mode?: 'replace' | 'append'
+    pattern?: string
+    columns?: string[]
+    constants?: Record<string, unknown>
+    idColumn?: string
+    idPrefix?: string
+  },
 ): Promise<DatasetLoadResult> {
   return json<DatasetLoadResult>(
     await fetch(`/api/miniapps/${id}/datastore/load`, {

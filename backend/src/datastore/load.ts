@@ -42,11 +42,57 @@ function coerce(v: string): unknown {
 
 export function parseRows(format: string, text: string): Record<string, unknown>[] {
   if (format === 'csv') return parseCsv(text)
+  if (format === 'text') throw new Error('Text imports require a pattern and columns.')
   // json (array of objects, or {rows:[...]} / {data:[...]})
   const parsed = JSON.parse(text)
   const arr = Array.isArray(parsed) ? parsed : parsed?.rows ?? parsed?.data ?? parsed?.items
   if (!Array.isArray(arr)) throw new Error('JSON must be an array of objects (or {rows:[...]}).')
   return arr
+}
+
+function compactIdPart(value: unknown) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 48) || 'row'
+}
+
+function parseTextPattern(
+  text: string,
+  input: Pick<LoadInput, 'pattern' | 'columns' | 'constants' | 'idColumn' | 'idPrefix'>,
+): Record<string, unknown>[] {
+  const columnNames = (input.columns ?? []).map((column) => column.trim()).filter(Boolean)
+  if (!input.pattern?.trim()) throw new Error('Text format requires a regex pattern.')
+  if (!columnNames.length) throw new Error('Text format requires at least one column name.')
+
+  let regex: RegExp
+  try {
+    regex = new RegExp(input.pattern, 'gm')
+  } catch (err) {
+    throw new Error(`Invalid text pattern: ${String((err as Error)?.message ?? err)}`)
+  }
+
+  const rows: Record<string, unknown>[] = []
+  for (const match of text.matchAll(regex)) {
+    const row: Record<string, unknown> = { ...(input.constants ?? {}) }
+    for (let index = 0; index < columnNames.length; index += 1) {
+      row[columnNames[index]] = (match[index + 1] ?? '').trim()
+    }
+    if (Object.values(row).some((value) => String(value ?? '').trim() !== '')) rows.push(row)
+  }
+
+  const idColumn = input.idColumn?.trim()
+  if (idColumn) {
+    const prefix = input.idPrefix?.trim() || (typeof input.constants?.source_vocab === 'string' ? input.constants.source_vocab : 'row')
+    rows.forEach((row, index) => {
+      if (row[idColumn] === undefined || row[idColumn] === '') {
+        row[idColumn] = `${compactIdPart(prefix)}_${compactIdPart(row.word ?? row.name ?? row[columnNames[0]])}_${index + 1}`
+      }
+    })
+  }
+
+  return rows
 }
 
 function typeOf(v: unknown): ColumnType {
@@ -73,10 +119,16 @@ function applyMapping(rows: Record<string, unknown>[], mapping?: Record<string, 
 
 export interface LoadInput {
   skillId: string
-  format: 'json' | 'csv'
+  format: 'json' | 'csv' | 'text'
   text: string
   table?: string
   mapping?: Record<string, string>
+  mode?: 'replace' | 'append'
+  pattern?: string
+  columns?: string[]
+  constants?: Record<string, unknown>
+  idColumn?: string
+  idPrefix?: string
 }
 
 export interface LoadResult {
@@ -94,7 +146,8 @@ export async function loadDataset(record: MiniappRecord, input: LoadInput): Prom
 
   let rows: Record<string, unknown>[]
   try {
-    rows = applyMapping(parseRows(input.format, input.text), input.mapping)
+    const parsed = input.format === 'text' ? parseTextPattern(input.text, input) : parseRows(input.format, input.text)
+    rows = applyMapping(parsed, input.mapping)
   } catch (err) {
     return { ok: false, message: `Parse failed: ${String((err as Error)?.message ?? err)}` }
   }
@@ -104,7 +157,10 @@ export async function loadDataset(record: MiniappRecord, input: LoadInput): Prom
   const columns = inferColumns(rows)
   const driver = getDatastoreDriver()
   await driver.ensureTable(record.id, table, columns)
-  const count = await driver.replaceRows(record.id, table, rows)
+  const count = input.mode === 'append'
+    ? await driver.insertRows(record.id, table, rows)
+    : await driver.replaceRows(record.id, table, rows)
+  const rowCount = (await driver.listTables(record.id)).find((info) => info.table === table)?.rowCount ?? count
 
   skill.source = 'library'
   skill.status = 'active'
@@ -113,14 +169,14 @@ export async function loadDataset(record: MiniappRecord, input: LoadInput): Prom
     datastore: driver.name,
     table,
     schema: columns,
-    rowCount: count,
+    rowCount,
     source: input.format,
   }
   // Don't keep the bulk data on the skill — it lives in the datastore now.
   delete (skill.config as Record<string, unknown>).dataset
   saveRecord(record)
 
-  return { ok: true, table, columns, rowCount: count, sample: rows.slice(0, 5), message: `Loaded ${count} rows into "${table}".` }
+  return { ok: true, table, columns, rowCount, sample: rows.slice(0, 5), message: `${input.mode === 'append' ? 'Appended' : 'Loaded'} ${count} rows into "${table}".` }
 }
 
 export async function queryDataset(record: MiniappRecord, spec: QuerySpec) {

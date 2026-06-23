@@ -244,7 +244,8 @@ export function parseAppFrameOpenLinkMessage(
   if (typeof href !== 'string') return null
   let url: URL
   try {
-    url = new URL(href, window.location.origin)
+    const locationOrigin = (globalThis as { location?: { origin?: unknown } }).location?.origin
+    url = new URL(href, typeof locationOrigin === 'string' ? locationOrigin : 'http://localhost')
   } catch {
     return null
   }

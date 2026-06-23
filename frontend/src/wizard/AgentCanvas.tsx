@@ -40,6 +40,9 @@ import {
   Power,
   Copy,
   Upload,
+  Settings,
+  Globe2,
+  Lock,
 } from 'lucide-react'
 import type {
   BotPlatform,
@@ -89,6 +92,9 @@ import {
   getCommunityUsage,
   getMiniapp,
   loadDataset,
+  updateMiniappSettings,
+  listPublishedAgents,
+  type PublishedAgent,
   type AgentEvent,
   type ChatTurn,
   type DatastoreTableInfo,
@@ -597,7 +603,9 @@ function ViewButton({ onClick }: { onClick?: (rect: DOMRect) => void }) {
 /* ──────────────── Define Requirements (compact summary) ──────────────── */
 
 function RequirementsColumn({ miniapp, onView }: { miniapp: MiniappRecord; onView: (rect: DOMRect) => void }) {
-  const name = miniapp.draft?.name ?? miniapp.manifest?.name ?? 'Agent'
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [override, setOverride] = useState<{ name?: string }>({})
+  const name = override.name ?? miniapp.draft?.name ?? miniapp.manifest?.name ?? 'Agent'
   const goal = miniapp.draft?.goal ?? miniapp.manifest?.description ?? ''
   return (
     <div className="flex w-[340px] flex-col gap-3">
@@ -611,11 +619,103 @@ function RequirementsColumn({ miniapp, onView }: { miniapp: MiniappRecord; onVie
           <div className="text-[17px] font-bold tracking-tight text-ink">{name}</div>
           <div className="text-[13px] leading-relaxed text-ink-secondary">{goal}</div>
         </div>
-        <div className="flex justify-end border-t border-border px-4 py-3">
+        <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
+          <button
+            onClick={() => setSettingsOpen(true)}
+            aria-label="Agent settings"
+            className="flex size-[30px] items-center justify-center rounded-[9px] border border-border-strong bg-surface text-ink-secondary transition hover:bg-surface-muted"
+          >
+            <Settings className="size-[15px]" />
+          </button>
           <ViewButton onClick={onView} />
         </div>
       </div>
+      {settingsOpen && (
+        <AgentSettingsDialog
+          miniapp={miniapp}
+          currentName={name}
+          onClose={() => setSettingsOpen(false)}
+          onSaved={(patch) => { if (patch.name) setOverride({ name: patch.name }); setSettingsOpen(false) }}
+        />
+      )}
     </div>
+  )
+}
+
+function AgentSettingsDialog({
+  miniapp,
+  currentName,
+  onClose,
+  onSaved,
+}: {
+  miniapp: MiniappRecord
+  currentName: string
+  onClose: () => void
+  onSaved: (patch: { name?: string; visibility?: 'private' | 'public' }) => void
+}) {
+  const [name, setName] = useState(currentName)
+  const [visibility, setVisibility] = useState<'private' | 'public'>(miniapp.visibility ?? 'private')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const save = async () => {
+    setSaving(true)
+    setError(null)
+    const patch = { name: name.trim() || undefined, visibility }
+    try {
+      await updateMiniappSettings(miniapp.id, patch)
+      onSaved(patch)
+    } catch (err) {
+      setError(String((err as Error)?.message ?? err))
+      setSaving(false)
+    }
+  }
+  const opt = (value: 'private' | 'public', icon: React.ReactNode, label: string, desc: string) => (
+    <button
+      type="button"
+      onClick={() => setVisibility(value)}
+      className={cn(
+        'flex items-start gap-2.5 rounded-[12px] border px-3 py-2.5 text-left transition',
+        visibility === value ? 'border-primary bg-accent-soft' : 'border-border hover:bg-surface-muted',
+      )}
+    >
+      <span className={cn('mt-0.5 flex size-[26px] shrink-0 items-center justify-center rounded-[8px]', visibility === value ? 'bg-primary/10 text-accent-ink' : 'bg-surface-muted text-ink-tertiary')}>{icon}</span>
+      <span className="min-w-0">
+        <span className="block text-[12.5px] font-semibold text-ink">{label}</span>
+        <span className="block text-[11.5px] leading-relaxed text-ink-tertiary">{desc}</span>
+      </span>
+    </button>
+  )
+  return createPortal(
+    <div className="fixed inset-0 z-[220] grid place-items-center bg-ink/40 backdrop-blur-sm cirrus-overlay p-6" onMouseDown={onClose}>
+      <div className="cirrus-pop w-full max-w-[440px] rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="border-b border-border px-5 py-4 text-[14px] font-semibold text-ink">Agent settings</div>
+        <div className="flex flex-col gap-4 p-5">
+          <div>
+            <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-ink-tertiary">Name</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full rounded-[10px] border border-border-strong bg-surface px-3 py-2 text-[13px] text-ink outline-none focus:border-primary"
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-ink-tertiary">Visibility</label>
+            <div className="flex flex-col gap-2">
+              {opt('private', <Lock className="size-[14px]" />, 'Private', 'Only you can see and use this agent.')}
+              {opt('public', <Globe2 className="size-[14px]" />, 'Public', 'Listed on the Community page for anyone to discover.')}
+            </div>
+          </div>
+          {error && <div className="text-[12px] text-destructive">{error}</div>}
+        </div>
+        <div className="flex justify-end gap-2 border-t border-border px-5 py-3">
+          <button onClick={onClose} className="rounded-[9px] border border-border px-3.5 py-2 text-[12.5px] font-medium text-ink-secondary hover:bg-surface-muted">Cancel</button>
+          <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-[9px] bg-primary px-4 py-2 text-[12.5px] font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50">
+            {saving && <Loader2 className="size-3.5 animate-spin" />} Save
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -1068,76 +1168,12 @@ function DatabaseSkillDiagnostics({ appId }: { appId: string }) {
   )
 }
 
-const DEFAULT_VOCAB_SOURCES = [
-  {
-    label: 'CET-4',
-    url: 'https://raw.githubusercontent.com/cuttlin/Vocabulary-of-CET-4/refs/heads/master/TXT/%E6%80%BB%E8%A1%A8/%E5%9B%9B%E7%BA%A7%E8%AF%8D%E6%B1%87%E6%80%BB%E8%A1%A8.txt',
-  },
-  {
-    label: 'IELTS',
-    url: 'https://raw.githubusercontent.com/fanhongtao/IELTS/refs/heads/master/IELTS%20Word%20List.txt',
-  },
-] as const
-
-function compactIdPart(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48) || 'word'
-}
-
-function vocabRow(source: string, word: string, phonetic: string, definition: string, index: number, importedAt: string) {
-  return {
-    id: `${compactIdPart(source)}_${compactIdPart(word)}_${index}`,
-    word: word.replace(/\*+$/g, ''),
-    source_vocab: source,
-    phonetic: phonetic.trim(),
-    definition: definition.trim(),
-    translation: definition.trim(),
-    example: '',
-    mastery: 0,
-    last_seen: '',
-    created_at: importedAt,
-  }
-}
-
-function parseCet4Vocabulary(text: string, importedAt: string) {
-  const rows: Record<string, unknown>[] = []
-  const seen = new Set<string>()
-  for (const line of text.split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (!trimmed || /^[A-Z]$/.test(trimmed)) continue
-    const matches = [...trimmed.matchAll(/(?:^|\s)([A-Za-z][A-Za-z -]*?)\/([^/\n]+)\/(.+?)(?=\s+[A-Za-z][A-Za-z -]*?\/[^/\n]+\/|$)/g)]
-    for (const match of matches) {
-      const word = match[1]?.trim()
-      const definition = match[3]?.trim()
-      if (!word || !definition) continue
-      const key = `CET-4:${word.toLowerCase()}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      rows.push(vocabRow('CET-4', word, match[2] ?? '', definition, rows.length + 1, importedAt))
-    }
-  }
-  return rows
-}
-
-function parseIeltsVocabulary(text: string, importedAt: string) {
-  const rows: Record<string, unknown>[] = []
-  const seen = new Set<string>()
-  for (const line of text.split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (!trimmed || /^README$|^Word List\s+\d+/i.test(trimmed) || /^[《#]|^范洪滔|^\d{4}-\d{2}-\d{2}/.test(trimmed)) continue
-    const match = trimmed.match(/^([A-Za-z][A-Za-z-]*\*?)\s+((?:\/[^/]+\/)|(?:\[[^\]]+\])|(?:\{[^}]+\}))\s+(.+)$/)
-    if (!match) continue
-    const word = match[1].trim()
-    const definition = match[3].trim()
-    const key = `IELTS:${word.replace(/\*+$/g, '').toLowerCase()}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    rows.push(vocabRow('IELTS', word, match[2] ?? '', definition, rows.length + 1, importedAt))
-  }
-  return rows
-}
-
-function parseVocabularySource(label: string, text: string, importedAt: string) {
-  return label === 'CET-4' ? parseCet4Vocabulary(text, importedAt) : parseIeltsVocabulary(text, importedAt)
+function parseDatasetConstants(value: string): Record<string, unknown> | undefined {
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+  const parsed = JSON.parse(trimmed)
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') throw new Error('Constants must be a JSON object.')
+  return parsed as Record<string, unknown>
 }
 
 function DatasetSkillLoader({
@@ -1149,7 +1185,17 @@ function DatasetSkillLoader({
   skill: MiniappSkill
   onUpdate: (partial: Partial<MiniappSkill>) => void
 }) {
-  const [urls, setUrls] = useState<string[]>(DEFAULT_VOCAB_SOURCES.map((source) => source.url))
+  const [sourceMode, setSourceMode] = useState<'url' | 'paste'>('url')
+  const [format, setFormat] = useState<'csv' | 'json' | 'text'>('csv')
+  const [mode, setMode] = useState<'replace' | 'append'>('replace')
+  const [sourceUrl, setSourceUrl] = useState('')
+  const [text, setText] = useState('')
+  const [table, setTable] = useState((skill.config?.table as string | undefined) ?? '')
+  const [pattern, setPattern] = useState('')
+  const [columns, setColumns] = useState('')
+  const [constants, setConstants] = useState('')
+  const [idColumn, setIdColumn] = useState('')
+  const [idPrefix, setIdPrefix] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -1157,28 +1203,34 @@ function DatasetSkillLoader({
   const loadedRows = skill.config?.rowCount as number | undefined
   const schema = (skill.config?.schema as { name: string; type: string }[] | undefined) ?? []
 
-  const importVocabulary = async () => {
+  const importDataset = async () => {
     setBusy(true)
     setMessage(null)
     setError(null)
     try {
-      const importedAt = new Date().toISOString()
-      const chunks = await Promise.all(
-        DEFAULT_VOCAB_SOURCES.map(async (source, index) => {
-          const res = await fetch(urls[index])
-          if (!res.ok) throw new Error(`${source.label} fetch failed: HTTP ${res.status}`)
-          const text = await res.text()
-          const rows = parseVocabularySource(source.label, text, importedAt)
-          if (!rows.length) throw new Error(`${source.label} parsed 0 rows`)
-          return { source, rows }
-        }),
-      )
-      const rows = chunks.flatMap((chunk) => chunk.rows)
+      const trimmedUrl = sourceUrl.trim()
+      const inputText = text.trim()
+      if (sourceMode === 'url' && !trimmedUrl) throw new Error('Source URL is required.')
+      if (sourceMode === 'paste' && !inputText) throw new Error('Dataset input is empty.')
+      const columnList = columns.split(/[\n,]/).map((column) => column.trim()).filter(Boolean)
+      const constantValues = parseDatasetConstants(constants)
+      if (format === 'text') {
+        if (!pattern.trim()) throw new Error('Text imports require a regex pattern.')
+        if (!columnList.length) throw new Error('Text imports require at least one column.')
+      }
       const result = await loadDataset(appId, {
         skillId: skill.id,
-        format: 'json',
-        table: 'vocabulary_items',
-        text: JSON.stringify(rows),
+        format,
+        mode,
+        table: table.trim() || undefined,
+        ...(format === 'text' ? {
+          pattern,
+          columns: columnList,
+          constants: constantValues,
+          idColumn: idColumn.trim() || undefined,
+          idPrefix: idPrefix.trim() || undefined,
+        } : {}),
+        ...(sourceMode === 'url' ? { url: trimmedUrl } : { text }),
       })
       if (!result.ok) throw new Error(result.message)
       onUpdate({
@@ -1186,7 +1238,9 @@ function DatasetSkillLoader({
         source: 'library',
         config: { ...skill.config, table: result.table, rowCount: result.rowCount, schema: result.columns },
       })
-      setMessage(`${result.message} CET-4 ${chunks[0].rows.length} rows, IELTS ${chunks[1].rows.length} rows.`)
+      setTable(result.table ?? table)
+      if (sourceMode === 'paste') setText('')
+      setMessage(result.message)
     } catch (err) {
       setError(String((err as Error)?.message ?? err))
     } finally {
@@ -1200,7 +1254,7 @@ function DatasetSkillLoader({
         <Database className="size-4 text-ink-secondary" />
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-semibold text-ink">Dataset import</div>
-          <div className="mt-0.5 text-[11.5px] text-ink-tertiary">Fetch raw vocabulary files and load parsed rows into this agent datastore.</div>
+          <div className="mt-0.5 text-[11.5px] text-ink-tertiary">Load CSV, JSON, or regex-parsed text into this agent datastore.</div>
         </div>
       </div>
       {loadedTable && (
@@ -1218,26 +1272,138 @@ function DatasetSkillLoader({
         </div>
       )}
       <div className="mt-3 flex flex-col gap-2">
-        {DEFAULT_VOCAB_SOURCES.map((source, index) => (
-          <label key={source.label} className="flex flex-col gap-1">
-            <span className="font-mono text-[10.5px] text-ink-tertiary">{source.label} raw URL</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-md bg-surface-muted p-0.5">
+            {(['url', 'paste'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setSourceMode(mode)}
+                className={cn('rounded px-2.5 py-1 text-[11.5px] font-medium capitalize', sourceMode === mode ? 'bg-white shadow-sm text-ink' : 'text-ink-tertiary')}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
+          <div className="inline-flex rounded-md bg-surface-muted p-0.5">
+            {(['csv', 'json', 'text'] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setFormat(option)}
+                className={cn('rounded px-2.5 py-1 text-[11.5px] font-medium uppercase', format === option ? 'bg-white shadow-sm text-ink' : 'text-ink-tertiary')}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+          <div className="inline-flex rounded-md bg-surface-muted p-0.5">
+            {(['replace', 'append'] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setMode(option)}
+                className={cn('rounded px-2.5 py-1 text-[11.5px] font-medium capitalize', mode === option ? 'bg-white shadow-sm text-ink' : 'text-ink-tertiary')}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        </div>
+        <label className="flex flex-col gap-1">
+          <span className="font-mono text-[10.5px] text-ink-tertiary">table name</span>
+          <input
+            value={table}
+            onChange={(event) => setTable(event.target.value)}
+            placeholder={loadedTable || skill.name || 'dataset'}
+            className="rounded-md border border-border bg-white/80 px-2.5 py-2 font-mono text-[11px] text-ink outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
+          />
+        </label>
+        {sourceMode === 'url' ? (
+          <label className="flex flex-col gap-1">
+            <span className="font-mono text-[10.5px] text-ink-tertiary">source URL</span>
             <input
-              value={urls[index]}
-              onChange={(event) => setUrls((next) => next.map((url, i) => (i === index ? event.target.value : url)))}
+              value={sourceUrl}
+              onChange={(event) => setSourceUrl(event.target.value)}
+              placeholder={format === 'text' ? 'https://example.com/data.txt' : 'https://example.com/data.csv'}
               className="rounded-md border border-border bg-white/80 px-2.5 py-2 font-mono text-[11px] text-ink outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
             />
           </label>
-        ))}
+        ) : (
+          <label className="flex flex-col gap-1">
+            <span className="font-mono text-[10.5px] text-ink-tertiary">dataset text</span>
+            <textarea
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              placeholder={format === 'csv' ? 'name,category,value\nexample,default,...' : format === 'json' ? '[{\"name\":\"example\",\"category\":\"default\"}]' : 'word /phonetic/ definition'}
+              rows={5}
+              className="resize-none rounded-md border border-border bg-white/80 px-2.5 py-2 font-mono text-[11px] text-ink outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
+            />
+          </label>
+        )}
+        {format === 'text' && (
+          <div className="grid grid-cols-1 gap-2">
+            <label className="flex flex-col gap-1">
+              <span className="font-mono text-[10.5px] text-ink-tertiary">regex pattern</span>
+              <textarea
+                value={pattern}
+                onChange={(event) => setPattern(event.target.value)}
+                placeholder="^([A-Za-z-]+)\\s+(.+)$"
+                rows={3}
+                className="resize-none rounded-md border border-border bg-white/80 px-2.5 py-2 font-mono text-[11px] text-ink outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="font-mono text-[10.5px] text-ink-tertiary">columns</span>
+              <input
+                value={columns}
+                onChange={(event) => setColumns(event.target.value)}
+                placeholder="word, phonetic, definition"
+                className="rounded-md border border-border bg-white/80 px-2.5 py-2 font-mono text-[11px] text-ink outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="font-mono text-[10.5px] text-ink-tertiary">constants JSON</span>
+              <textarea
+                value={constants}
+                onChange={(event) => setConstants(event.target.value)}
+                placeholder='{"source":"library"}'
+                rows={3}
+                className="resize-none rounded-md border border-border bg-white/80 px-2.5 py-2 font-mono text-[11px] text-ink outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
+              />
+            </label>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <label className="flex flex-col gap-1">
+                <span className="font-mono text-[10.5px] text-ink-tertiary">generated id column</span>
+                <input
+                  value={idColumn}
+                  onChange={(event) => setIdColumn(event.target.value)}
+                  placeholder="id"
+                  className="rounded-md border border-border bg-white/80 px-2.5 py-2 font-mono text-[11px] text-ink outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="font-mono text-[10.5px] text-ink-tertiary">id prefix</span>
+                <input
+                  value={idPrefix}
+                  onChange={(event) => setIdPrefix(event.target.value)}
+                  placeholder="dataset"
+                  className="rounded-md border border-border bg-white/80 px-2.5 py-2 font-mono text-[11px] text-ink outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
+                />
+              </label>
+            </div>
+          </div>
+        )}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           type="button"
-          onClick={() => void importVocabulary()}
+          onClick={() => void importDataset()}
           disabled={busy}
           className="inline-flex h-8 items-center gap-1.5 rounded-[9px] bg-primary px-3 text-[12px] font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
         >
           {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
-          Import vocabulary URLs
+          Import dataset
         </button>
         {message && <span className="text-[12px] text-live">{message}</span>}
         {error && <span className="text-[12px] text-amber-700">{error}</span>}
@@ -2556,17 +2722,26 @@ const EXPAND_ITEM: Variants = {
   show: { opacity: 1, y: 0, transition: { type: 'spring', bounce: 0.3, duration: 0.4 } },
 }
 
+type CommunityItem = { kind: 'hardcoded'; agent: CommunityAgent } | { kind: 'published'; agent: PublishedAgent }
+
 export function CommunityPage({ onNavigate }: { onNavigate: (v: NavView) => void }) {
   const [usage, setUsage] = useState<Record<string, number>>({})
+  const [published, setPublished] = useState<PublishedAgent[]>([])
   useEffect(() => {
     void getCommunityUsage().then(setUsage)
+    void listPublishedAgents().then(setPublished)
   }, [])
+  // The 6 hardcoded framework agents come first; user-published agents follow.
+  const items: CommunityItem[] = [
+    ...COMMUNITY.map((agent) => ({ kind: 'hardcoded' as const, agent })),
+    ...published.map((agent) => ({ kind: 'published' as const, agent })),
+  ]
   // Masonry columns: each column is an independent flex stack, so expanding one
   // card only grows its own column — other columns are untouched.
   const lg = useMediaQuery('(min-width: 1024px)')
   const sm = useMediaQuery('(min-width: 640px)')
   const cols = lg ? 3 : sm ? 2 : 1
-  const columns = Array.from({ length: cols }, (_, c) => COMMUNITY.filter((_, i) => i % cols === c))
+  const columns = Array.from({ length: cols }, (_, c) => items.filter((_, i) => i % cols === c))
   return (
     <div className="dot-bg relative h-full w-full overflow-auto">
       <div className={PAGE_CONTAINER_CLASS}>
@@ -2577,12 +2752,33 @@ export function CommunityPage({ onNavigate }: { onNavigate: (v: NavView) => void
         <div className="mt-6 flex items-start gap-4 sm:mt-7">
           {columns.map((colItems, ci) => (
             <div key={ci} className="flex min-w-0 flex-1 flex-col gap-4">
-              {colItems.map((a) => (
-                <CommunityAgentCard key={a.name} agent={a} usedIn={usage[`community:${a.name}`] ?? 0} onNavigate={onNavigate} />
-              ))}
+              {colItems.map((it) =>
+                it.kind === 'hardcoded' ? (
+                  <CommunityAgentCard key={'h-' + it.agent.name} agent={it.agent} usedIn={usage[`community:${it.agent.name}`] ?? 0} onNavigate={onNavigate} />
+                ) : (
+                  <PublishedAgentCard key={'p-' + it.agent.id} agent={it.agent} />
+                ),
+              )}
             </div>
           ))}
         </div>
+      </div>
+    </div>
+  )
+}
+
+function PublishedAgentCard({ agent }: { agent: PublishedAgent }) {
+  return (
+    <div className="flex min-h-[152px] cursor-default flex-col gap-3 rounded-[16px] border border-border bg-white p-5 text-left shadow-[0_8px_24px_-12px_rgba(25,25,23,0.10)]">
+      <div className="flex items-center gap-2.5">
+        <div className="flex size-[34px] shrink-0 items-center justify-center rounded-[9px] bg-accent-soft text-accent-ink">
+          <Sparkles className="size-[18px]" />
+        </div>
+        <div className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{agent.name}</div>
+      </div>
+      <div className="line-clamp-3 flex-1 text-[12.5px] leading-relaxed text-ink-secondary">{agent.description || 'A community-published agent.'}</div>
+      <div className="flex items-center gap-2">
+        <span className="rounded-full bg-surface-muted px-2.5 py-1 text-[11px] font-semibold text-ink-secondary">Community</span>
       </div>
     </div>
   )
@@ -4754,7 +4950,13 @@ export function applyBuildChatEvent(messages: UiMessage[], assistantId: string, 
     const activities = m.activities ? [...m.activities] : []
     switch (ev.type) {
       case 'status':
-        activities.push({ kind: 'status', text: ev.text })
+        if (ev.text.startsWith('Still working…')) {
+          const previous = activities.findIndex((activity) => activity.kind === 'status' && activity.text.startsWith('Still working…'))
+          if (previous >= 0) activities[previous] = { kind: 'status', text: ev.text }
+          else activities.push({ kind: 'status', text: ev.text })
+        } else {
+          activities.push({ kind: 'status', text: ev.text })
+        }
         return { ...m, activities }
       case 'tool_call':
         activities.push({ kind: 'tool', text: ev.summary })
@@ -4843,10 +5045,22 @@ export function BuildChat({
   const inputRef = useRef<HTMLInputElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [workingStartedAt, setWorkingStartedAt] = useState<number | null>(null)
+  const [now, setNow] = useState(Date.now())
   const toBottom = useCallback(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [])
+  useEffect(() => {
+    if (!building) {
+      setWorkingStartedAt(null)
+      return
+    }
+    setWorkingStartedAt((current) => current ?? Date.now())
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [building])
   // Stick to the latest message as new ones stream in.
   useEffect(() => {
     if (loading) return
@@ -4885,6 +5099,16 @@ export function BuildChat({
     window.setTimeout(() => inputRef.current?.focus(), 0)
   }
   const inputSegments = mentionHighlightSegments(input, mentionAgents)
+  const latestAssistant = [...messages].reverse().find((message) => message.role === 'assistant')
+  const activities = latestAssistant?.activities ?? []
+  const heartbeatActivity = [...activities].reverse().find((activity) => activity.text.startsWith('Still working…'))
+  const latestActivity = [...activities].reverse().find((activity) => !activity.text.startsWith('Still working…'))
+  const elapsed = workingStartedAt ? formatWorkedDuration(now - workingStartedAt) : ''
+  const workingText =
+    heartbeatActivity?.text ??
+    [elapsed ? `${busyLabel.replace(/\.+$/, '')} for ${elapsed}` : busyLabel, latestActivity?.text ? `Last step: ${latestActivity.text}` : 'Preparing the builder…']
+      .filter(Boolean)
+      .join(' · ')
   return (
     <div className="flex h-full min-h-0 w-full flex-1 flex-col bg-white/40">
       {title && <div className="border-b border-black/5 px-4 py-2.5 text-[12px] font-semibold text-ink">{title}</div>}
@@ -4906,8 +5130,9 @@ export function BuildChat({
           />
         ))}
         {building && (
-          <div className="flex items-center gap-2 text-xs text-ink-tertiary">
-            <Loader2 className="size-3.5 animate-spin" /> {busyLabel}
+          <div className="flex min-w-0 items-center gap-2 text-xs text-ink-tertiary" title={workingText}>
+            <Loader2 className="size-3.5 shrink-0 animate-spin" />
+            <span className="truncate">{workingText}</span>
           </div>
         )}
         <div ref={endRef} />

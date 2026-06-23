@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { config } from './config.ts'
 import { registerAuthRoutes, requireAuth } from './auth/index.ts'
 import * as db from './db.ts'
-import { createMiniapp, deleteMiniapp, listRecords, loadRecord, saveRecord } from './store.ts'
+import { createMiniapp, deleteMiniapp, listRecords, listPublishedRecords, loadRecord, saveRecord } from './store.ts'
 import { runDeveloperAgent, type ChatTurn, type AgentEvent } from './agent/developerAgent.ts'
 import {
   decideCirrusRuntimeRouting,
@@ -159,6 +159,17 @@ app.get('/api/community/usage', async (_req, res) => {
   res.json({ usage })
 })
 
+// Public: user-built agents whose owner set visibility=public. Shown on the
+// community page (after the hardcoded framework agents).
+app.get('/api/community/published', async (_req, res) => {
+  const published = (await listPublishedRecords()).map((r) => ({
+    id: r.id,
+    name: r.manifest?.name ?? r.draft?.name ?? 'Agent',
+    description: r.manifest?.description ?? r.draft?.goal ?? '',
+  }))
+  res.json({ agents: published })
+})
+
 app.get('/api/miniapps', async (req, res) => {
   res.json({ miniapps: (await listRecords(req.userId!)).map(summary) })
 })
@@ -181,20 +192,58 @@ app.delete('/api/miniapps/:id', async (req, res) => {
   res.json({ ok: true })
 })
 
-// Load data into the instance's datastore (paste JSON / CSV → a table the skill owns).
+// Load data into the instance's datastore (paste/fetch JSON or CSV → a table the skill owns).
 app.post('/api/miniapps/:id/datastore/load', async (req, res) => {
   const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const body = req.body ?? {}
+  const sourceUrl = typeof body.url === 'string' ? body.url.trim() : ''
+  let text = String(body.text ?? '')
+  if (sourceUrl) {
+    const fetched = await fetchDatasetSource(sourceUrl)
+    if (!fetched.ok) return res.json(fetched)
+    text = fetched.text
+  }
   const result = await loadDataset(record, {
     skillId: String(body.skillId ?? ''),
-    format: body.format === 'csv' ? 'csv' : 'json',
-    text: String(body.text ?? ''),
+    format: body.format === 'csv' ? 'csv' : body.format === 'text' ? 'text' : 'json',
+    text,
     table: body.table ? String(body.table) : undefined,
     mapping: body.mapping ?? undefined,
+    mode: body.mode === 'append' ? 'append' : 'replace',
+    pattern: body.pattern ? String(body.pattern) : undefined,
+    columns: Array.isArray(body.columns) ? body.columns.map(String) : undefined,
+    constants: isPlainObject(body.constants) ? body.constants : undefined,
+    idColumn: body.idColumn ? String(body.idColumn) : undefined,
+    idPrefix: body.idPrefix ? String(body.idPrefix) : undefined,
   })
   res.json(result)
 })
+
+const DATASET_SOURCE_MAX_BYTES = 5 * 1024 * 1024
+
+async function fetchDatasetSource(sourceUrl: string): Promise<{ ok: true; text: string } | { ok: false; message: string }> {
+  let url: URL
+  try {
+    url = new URL(sourceUrl)
+  } catch {
+    return { ok: false, message: 'Invalid dataset URL.' }
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return { ok: false, message: 'Dataset URL must use http or https.' }
+  }
+  try {
+    const response = await fetch(url)
+    if (!response.ok) return { ok: false, message: `Dataset fetch failed: HTTP ${response.status}` }
+    const contentLength = Number(response.headers.get('content-length') ?? 0)
+    if (contentLength > DATASET_SOURCE_MAX_BYTES) return { ok: false, message: 'Dataset source is larger than 5 MB.' }
+    const text = await response.text()
+    if (new TextEncoder().encode(text).byteLength > DATASET_SOURCE_MAX_BYTES) return { ok: false, message: 'Dataset source is larger than 5 MB.' }
+    return { ok: true, text }
+  } catch (err) {
+    return { ok: false, message: `Dataset fetch failed: ${String((err as Error)?.message ?? err)}` }
+  }
+}
 
 // Preview/query a datastore table (structured, scoped — no raw SQL).
 app.post('/api/miniapps/:id/datastore/query', async (req, res) => {
@@ -422,6 +471,22 @@ app.put('/api/miniapps/:id/flow', async (req, res) => {
   res.json({ miniapp: summary(record) })
 })
 
+// Agent settings: rename + visibility (private/public). Public agents appear on
+// the community page.
+app.patch('/api/miniapps/:id/settings', async (req, res) => {
+  const record = await loadRecord(req.params.id)
+  if (!record) return res.status(404).json({ error: 'not found' })
+  const body = (req.body ?? {}) as { name?: string; visibility?: 'private' | 'public' }
+  const name = typeof body.name === 'string' ? body.name.trim() : undefined
+  if (name) {
+    if (record.draft) record.draft = { ...record.draft, name }
+    if (record.manifest) record.manifest = { ...record.manifest, name }
+  }
+  if (body.visibility === 'private' || body.visibility === 'public') record.visibility = body.visibility
+  await saveRecord(record)
+  res.json({ miniapp: summary(record) })
+})
+
 app.post('/api/miniapps/:id/live-chat', async (req, res) => {
   const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
@@ -466,17 +531,48 @@ app.post('/api/miniapps/:id/chat', async (req, res) => {
   res.setHeader('Connection', 'keep-alive')
   res.flushHeaders?.()
 
+  const startedAt = Date.now()
+  let lastEventAt = startedAt
+  let lastStep = 'Starting Mini App builder'
+  let closed = false
+  let heartbeat: ReturnType<typeof setInterval> | null = null
+  res.on('close', () => {
+    closed = true
+    if (heartbeat) clearInterval(heartbeat)
+  })
   const emit = (event: AgentEvent) => {
+    if (closed) return
+    lastEventAt = Date.now()
+    if (event.type === 'tool_call') lastStep = event.summary
+    else if (event.type === 'status') lastStep = event.text
+    else if (event.type === 'build') lastStep = event.ok ? 'Build succeeded' : 'Build failed'
     res.write(`data: ${JSON.stringify(event)}\n\n`)
   }
+  emit({ type: 'status', text: 'Starting Mini App builder…' })
+  heartbeat = setInterval(() => {
+    if (closed) return
+    const now = Date.now()
+    const elapsedSeconds = Math.max(1, Math.round((now - startedAt) / 1000))
+    const quietSeconds = Math.max(1, Math.round((now - lastEventAt) / 1000))
+    res.write(
+      `data: ${JSON.stringify({
+        type: 'status',
+        text: `Still working… ${elapsedSeconds}s elapsed, ${quietSeconds}s since last update. Last step: ${lastStep}`,
+      })}\n\n`,
+    )
+  }, 12_000)
 
   try {
     await runDeveloperAgent(record, history, emit)
   } catch (err) {
     emit({ type: 'error', message: String((err as Error)?.message ?? err) })
+  } finally {
+    if (heartbeat) clearInterval(heartbeat)
   }
-  res.write('data: [DONE]\n\n')
-  res.end()
+  if (!closed) {
+    res.write('data: [DONE]\n\n')
+    res.end()
+  }
 })
 
 // Host action handler. Called by the frontend host when the iframe posts an action
