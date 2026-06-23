@@ -15,6 +15,7 @@ import {
   submitCanvasScreenshotResponse,
   streamChat,
   getAuth,
+  devLogin,
   logout,
   googleLoginUrl,
   type AuthInfo,
@@ -438,7 +439,7 @@ export function App() {
     return <div className="dot-bg grid h-full w-full place-items-center text-sm text-muted-foreground">Loading…</div>
   }
   if (!auth.user) {
-    return <LoginScreen />
+    return <LoginScreen devAuth={auth.devAuth} onDevLogin={(user) => setAuth((prev) => ({ user, devAuth: prev?.devAuth ?? false, googleAuth: prev?.googleAuth ?? false }))} />
   }
 
   // Top-level navigation (URL routes: /agent, /community, /runtime, /new; / redirects to /agent).
@@ -516,7 +517,19 @@ const loginFaqs = [
   },
 ]
 
-function LoginScreen() {
+function LoginScreen({ devAuth, onDevLogin }: { devAuth: boolean; onDevLogin: (user: AuthUser) => void }) {
+  const [devLoggingIn, setDevLoggingIn] = useState(false)
+
+  const handleDevLogin = async () => {
+    setDevLoggingIn(true)
+    try {
+      const user = await devLogin('kai@megaeth.com', 'Kai')
+      onDevLogin(user)
+    } finally {
+      setDevLoggingIn(false)
+    }
+  }
+
   return (
     <div className="relative min-h-full w-full overflow-y-auto bg-white px-5 py-8 sm:px-8 sm:py-12">
       <div className="absolute inset-0 opacity-70">
@@ -537,6 +550,16 @@ function LoginScreen() {
         >
           使用 Google 登录
         </InteractiveHoverButton>
+        {devAuth && (
+          <button
+            type="button"
+            onClick={handleDevLogin}
+            disabled={devLoggingIn}
+            className="mx-auto mt-3 rounded-full px-4 py-2 text-[12px] font-medium text-ink-tertiary transition hover:bg-surface-muted hover:text-ink disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {devLoggingIn ? 'Signing in…' : 'Continue as kai@megaeth.com'}
+          </button>
+        )}
       </main>
     </div>
   )

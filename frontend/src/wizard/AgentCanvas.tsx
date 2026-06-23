@@ -38,6 +38,7 @@ import {
   CalendarClock,
   Pause,
   Power,
+  Copy,
 } from 'lucide-react'
 import type {
   BotPlatform,
@@ -3489,6 +3490,39 @@ function RuntimeWindow({
   )
 }
 
+function ShareRuntimeSection({ runtimeId }: { runtimeId: string }) {
+  const url = `${window.location.origin}/r/${runtimeId}`
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      /* clipboard blocked — the link is still selectable */
+    }
+  }
+  return (
+    <div>
+      <div className="font-mono text-[10.5px] tracking-[0.12em] text-ink-tertiary">SHARE</div>
+      <p className="mt-1.5 text-[12px] leading-relaxed text-ink-tertiary">
+        A use-only chat link. Anyone who opens it can chat with this runtime — no login, and they can’t change its setup.
+      </p>
+      <div className="mt-2 flex items-center gap-2 rounded-[10px] border border-border bg-surface px-3 py-2">
+        <a href={url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-mono text-[12px] text-accent-ink hover:underline">
+          {url}
+        </a>
+        <button
+          onClick={copy}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-[8px] border border-border px-2.5 py-1.5 text-[11.5px] font-medium text-ink-secondary transition hover:bg-surface-muted"
+        >
+          {copied ? <><Check className="size-3.5 text-live" /> Copied</> : <><Copy className="size-3.5" /> Copy</>}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function DetailsPanel({
   runtime,
   agents,
@@ -3524,6 +3558,8 @@ function DetailsPanel({
           ))}
         </div>
       </div>
+
+      {runtime && <ShareRuntimeSection runtimeId={runtime.id} />}
 
       <div>
         <div className="font-mono text-[10.5px] tracking-[0.12em] text-ink-tertiary">SANDBOX</div>
@@ -4495,7 +4531,7 @@ function ConnectBotDialog({
 
 /* ───────── Mini App · build chat (Edit mode) ───────── */
 
-function applyBuildChatEvent(messages: UiMessage[], assistantId: string, ev: AgentEvent): UiMessage[] {
+export function applyBuildChatEvent(messages: UiMessage[], assistantId: string, ev: AgentEvent): UiMessage[] {
   return messages.map((m) => {
     if (m.id !== assistantId) return m
     const activities = m.activities ? [...m.activities] : []
@@ -4561,7 +4597,7 @@ function mentionHighlightSegments(text: string, agents: RuntimeAgentRef[]): { te
   return segments
 }
 
-function BuildChat({
+export function BuildChat({
   title,
   placeholder,
   empty,

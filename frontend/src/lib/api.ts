@@ -462,6 +462,29 @@ export async function* streamRuntimeChat(id: string, history: ChatTurn[], signal
   yield* streamEvents(res)
 }
 
+// ── Public (no-auth) runtime chat: shareable use-only URL ──
+export interface PublicRuntime {
+  id: string
+  name: string
+  agents: { key: string; name: string; source: 'own' | 'community' }[]
+}
+
+export async function getPublicRuntime(id: string): Promise<PublicRuntime> {
+  const data = await json<{ runtime: PublicRuntime }>(await fetch(`/api/public/runtimes/${id}`))
+  return data.runtime
+}
+
+export async function* streamPublicRuntimeChat(id: string, history: ChatTurn[], signal?: AbortSignal): AsyncGenerator<AgentEvent> {
+  const res = await fetch(`/api/public/runtimes/${id}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify({ history }),
+    signal,
+  })
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+  yield* streamEvents(res)
+}
+
 // ── Cron jobs ──
 export async function listRuntimeCron(id: string): Promise<CronJob[]> {
   const data = await json<{ jobs: CronJob[] }>(await fetch(`/api/runtimes/${id}/cron`))

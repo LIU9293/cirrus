@@ -92,6 +92,40 @@ app.get('/api/health', async (_req, res) => {
   res.json({ ok: true, model: config.model })
 })
 
+// ── Public, no-auth chat: a runtime can be shared as a use-only chat URL ──
+// (/api/public/* is outside the requireAuth-guarded /api/runtimes prefix).
+// Anyone with the runtime id can chat with it; turns are NOT persisted to the
+// owner's transcript, so each visitor gets an isolated, ephemeral conversation.
+app.get('/api/public/runtimes/:id', async (req, res) => {
+  const runtime = await loadRuntime(req.params.id)
+  if (!runtime) return res.status(404).json({ error: 'not found' })
+  res.json({ runtime: { id: runtime.id, name: runtime.name, agents: runtime.agents.map((a) => ({ key: a.key, name: a.name, source: a.source })) } })
+})
+
+app.post('/api/public/runtimes/:id/chat', async (req, res) => {
+  const runtime = await loadRuntime(req.params.id)
+  if (!runtime) return res.status(404).json({ error: 'not found' })
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.flushHeaders?.()
+  const emit = (event: AgentEvent) => { res.write(`data: ${JSON.stringify(event)}\n\n`) }
+  emit({ type: 'status', text: 'Working with CirrusRuntimeAgent…' })
+  try {
+    const history = (req.body?.history ?? []) as ChatTurn[]
+    const { message, activities, durationMs, ui } = await executeRuntimeTurn(runtime, history, { persist: false })
+    for (const activity of activities) emit(activityToEvent(activity))
+    for (const chunk of assistantChunks(message)) emit({ type: 'assistant', text: chunk })
+    for (const image of ui?.images ?? []) emit({ type: 'image', url: image.url, alt: image.alt })
+    if (ui?.choices?.length) emit({ type: 'choices', choices: ui.choices, allowFreeText: ui.allowFreeText })
+    emit({ type: 'done', durationMs })
+  } catch (err) {
+    emit({ type: 'error', message: String((err as Error)?.message ?? err) })
+  }
+  res.write('data: [DONE]\n\n')
+  res.end()
+})
+
 // Public: how many runtimes (across everyone) use each community agent. Powers
 // the "Used in N runtimes" stat on community cards.
 app.get('/api/community/usage', async (_req, res) => {
