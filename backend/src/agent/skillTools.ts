@@ -52,6 +52,184 @@ function readCredentials(record: MiniappRecord, skill: MiniappSkill): Record<str
   }
 }
 
+function parseJsonMaybe(text: string): unknown {
+  const trimmed = text.trim()
+  if (!trimmed) return ''
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return trimmed
+  }
+}
+
+function queryString(params: Record<string, unknown>): string {
+  const qs = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') continue
+    if (Array.isArray(value)) qs.set(key, value.map(String).join(','))
+    else qs.set(key, String(value))
+  }
+  const out = qs.toString()
+  return out ? `?${out}` : ''
+}
+
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  return value.map(String).map((s) => s.trim()).filter(Boolean)
+}
+
+function repoRef(creds: Record<string, string>, args: any): { owner: string; repo: string } | { error: string } {
+  const owner = String(args?.owner ?? creds.default_owner ?? '').trim()
+  const repo = String(args?.repo ?? creds.default_repo ?? '').trim()
+  if (!owner || !repo) return { error: 'owner and repo are required, or configure default_owner/default_repo credentials.' }
+  return { owner, repo }
+}
+
+function compactGithubItem(item: any) {
+  if (!isPlainObject(item)) return item
+  return {
+    id: item.id,
+    number: item.number,
+    name: item.name,
+    full_name: item.full_name,
+    title: item.title,
+    state: item.state,
+    html_url: item.html_url,
+    description: item.description,
+    private: item.private,
+    default_branch: item.default_branch,
+    updated_at: item.updated_at,
+    user: isPlainObject(item.user) ? { login: item.user.login, html_url: item.user.html_url } : undefined,
+    labels: Array.isArray(item.labels) ? item.labels.map((label: any) => (isPlainObject(label) ? label.name : label)).filter(Boolean) : undefined,
+  }
+}
+
+async function githubApi(record: MiniappRecord, skill: MiniappSkill, path: string, init: RequestInit = {}) {
+  const creds = readCredentials(record, skill)
+  const token = String(creds.token ?? '').trim()
+  if (!token) return { ok: false, error: 'GitHub token is not configured.' }
+  const res = await fetch(`https://api.github.com${path}`, {
+    ...init,
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${token}`,
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...(init.headers ?? {}),
+    },
+  })
+  const text = await res.text()
+  const body = parseJsonMaybe(text.slice(0, 12000))
+  return { ok: res.ok, status: res.status, body, headers: { rateLimitRemaining: res.headers.get('x-ratelimit-remaining') } }
+}
+
+function githubError(res: any, fallback = 'GitHub request failed.') {
+  if (typeof res?.error === 'string') return res.error
+  return isPlainObject(res?.body) ? String(res.body.message ?? fallback) : fallback
+}
+
+function requireConfirmed(args: any) {
+  return args?.userConfirmed === true ? null : toolResult({ ok: false, error: 'This GitHub write requires explicit user confirmation. Re-ask the user and call with userConfirmed=true only after they confirm the exact change.' })
+}
+
+function configuredHttpBase(record: MiniappRecord, skill: MiniappSkill) {
+  const creds = readCredentials(record, skill)
+  const base = String(creds.base_url ?? skill.config?.baseUrl ?? '').trim()
+  if (!base) return { error: 'HTTP API base_url is not configured.', creds }
+  try {
+    const url = new URL(base)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return { error: 'base_url must use http or https.', creds }
+    return { base: url, creds }
+  } catch {
+    return { error: 'HTTP API base_url is not a valid URL.', creds }
+  }
+}
+
+function resolveHttpTarget(base: URL, args: any, creds: Record<string, string>) {
+  const raw = String(args?.url ?? args?.path ?? creds.test_path ?? '').trim()
+  const target = raw ? new URL(raw, base) : new URL(base)
+  const basePath = base.pathname.endsWith('/') ? base.pathname : `${base.pathname}/`
+  const sameOrigin = target.origin === base.origin
+  const underBasePath = target.pathname === base.pathname || target.pathname.startsWith(basePath) || base.pathname === '/'
+  if (!sameOrigin || !underBasePath) throw new Error('HTTP request target must stay under the configured base_url.')
+  const query = isPlainObject(args?.query) ? args.query : {}
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null) continue
+    if (Array.isArray(value)) for (const item of value) target.searchParams.append(key, String(item))
+    else target.searchParams.set(key, String(value))
+  }
+  return target
+}
+
+function httpAuthHeaders(creds: Record<string, string>, target: URL): Record<string, string> | { error: string } {
+  const authType = String(creds.auth_type ?? 'none').trim().toLowerCase()
+  if (!authType || authType === 'none') return {}
+  if (authType === 'bearer_token') {
+    const token = String(creds.token ?? '').trim()
+    if (!token) return { error: 'Bearer token is required for auth_type=bearer_token.' }
+    return { Authorization: `Bearer ${token}` }
+  }
+  if (authType === 'api_key_header') {
+    const key = String(creds.api_key ?? '').trim()
+    if (!key) return { error: 'API key is required for auth_type=api_key_header.' }
+    return { [String(creds.api_key_name ?? 'X-API-Key').trim() || 'X-API-Key']: key }
+  }
+  if (authType === 'api_key_query') {
+    const key = String(creds.api_key ?? '').trim()
+    if (!key) return { error: 'API key is required for auth_type=api_key_query.' }
+    target.searchParams.set(String(creds.api_key_name ?? 'api_key').trim() || 'api_key', key)
+    return {}
+  }
+  if (authType === 'basic_auth') {
+    const username = String(creds.username ?? '').trim()
+    const password = String(creds.password ?? '')
+    if (!username || !password) return { error: 'username and password are required for auth_type=basic_auth.' }
+    return { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` }
+  }
+  return { error: `Unsupported HTTP auth_type: ${authType}` }
+}
+
+async function callConfiguredHttp(record: MiniappRecord, skill: MiniappSkill, args: any) {
+  const baseInfo = configuredHttpBase(record, skill)
+  if ('error' in baseInfo) return toolResult({ ok: false, error: baseInfo.error })
+  try {
+    const target = resolveHttpTarget(baseInfo.base, args, baseInfo.creds)
+    const authHeaders = httpAuthHeaders(baseInfo.creds, target)
+    if ('error' in authHeaders) return toolResult({ ok: false, error: authHeaders.error })
+    const method = String(args?.method ?? 'GET').trim().toUpperCase()
+    const allowedMethods = Array.isArray(skill.config?.allowedMethods) ? skill.config.allowedMethods.map(String) : ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+    if (!allowedMethods.includes(method)) return toolResult({ ok: false, error: `HTTP method ${method} is not allowed for this skill.` })
+    const inputHeaders = isPlainObject(args?.headers) ? args.headers : {}
+    const safeHeaders: Record<string, string> = {}
+    for (const [key, value] of Object.entries(inputHeaders)) {
+      const lower = key.toLowerCase()
+      if (['authorization', 'cookie', 'set-cookie', 'proxy-authorization'].includes(lower)) continue
+      safeHeaders[key] = String(value)
+    }
+    const hasBody = args?.body !== undefined && args?.body !== null && method !== 'GET'
+    const res = await fetch(target, {
+      method,
+      headers: {
+        Accept: 'application/json, text/plain;q=0.9, */*;q=0.8',
+        ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+        ...safeHeaders,
+        ...authHeaders,
+      },
+      ...(hasBody ? { body: typeof args.body === 'string' ? args.body : JSON.stringify(args.body) } : {}),
+    })
+    const limit = Math.min(Number(skill.config?.responseLimitBytes) || 8000, 20000)
+    const text = (await res.text()).slice(0, limit)
+    return toolResult({
+      ok: res.ok,
+      status: res.status,
+      url: target.toString().replace(target.searchParams.get(String(baseInfo.creds.api_key_name ?? 'api_key')) ?? '__never__', '[redacted]'),
+      body: parseJsonMaybe(text),
+      truncated: text.length >= limit,
+    })
+  } catch (err) {
+    return toolResult({ ok: false, error: String((err as Error)?.message ?? err) })
+  }
+}
+
 function validColumnType(value: unknown): ColumnType {
   return value === 'number' || value === 'boolean' || value === 'json' ? value : 'text'
 }
@@ -265,19 +443,169 @@ function builtinTool(Type: Type, key: string, spec: SkillToolCall, skill: Miniap
           return toolResult({ ok: true, query: q, results: await llm('You simulate a web search. Return 3 short result snippets as plain text.', q), simulated: true })
         } }
     case 'http_request':
-      return { ...base, parameters: Type.Object({ url: Type.String(), method: Type.Optional(Type.String()), body: Type.Optional(Type.Any()) }),
+      return { ...base, parameters: Type.Object({
+          path: Type.Optional(Type.String()),
+          url: Type.Optional(Type.String()),
+          method: Type.Optional(Type.String()),
+          query: Type.Optional(Type.Record(Type.String(), Type.Any())),
+          headers: Type.Optional(Type.Record(Type.String(), Type.Any())),
+          body: Type.Optional(Type.Any()),
+        }),
         execute: async (_i, a) => {
-          const args = a as any
+          return await callConfiguredHttp(record, skill, a)
+        } }
+    case 'http_connection_status':
+      return { ...base, parameters: Type.Object({ path: Type.Optional(Type.String()) }),
+        execute: async (_i, a) => await callConfiguredHttp(record, skill, { path: (a as any)?.path, method: 'GET' }) }
+    case 'github_connection_status':
+      return {
+        ...base,
+        parameters: Type.Object({}),
+        execute: async () => {
           try {
-            const res = await fetch(String(args?.url), {
-              method: String(args?.method ?? 'GET'),
-              ...(args?.body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args.body) } : {}),
+            const user = await githubApi(record, skill, '/user')
+            if (!user.ok) return toolResult({ ok: false, status: user.status, error: githubError(user, 'GitHub authentication failed.') })
+            const rate = await githubApi(record, skill, '/rate_limit')
+            const body = user.body as any
+            return toolResult({
+              ok: true,
+              authenticated: true,
+              login: body?.login,
+              scopes: 'token accepted',
+              rateLimitRemaining: rate.headers?.rateLimitRemaining,
             })
-            return toolResult({ ok: res.ok, status: res.status, body: (await res.text()).slice(0, 4000) })
           } catch (err) {
             return toolResult({ ok: false, error: String((err as Error)?.message ?? err) })
           }
-        } }
+        },
+      }
+    case 'github_list_repositories':
+      return {
+        ...base,
+        parameters: Type.Object({ type: Type.Optional(Type.String()), limit: Type.Optional(Type.Number()) }),
+        execute: async (_i, a) => {
+          const args = a as any
+          const limit = Math.min(Number(args?.limit) || 30, 100)
+          const type = ['all', 'owner', 'member'].includes(String(args?.type)) ? String(args.type) : 'owner'
+          const res = await githubApi(record, skill, `/user/repos${queryString({ type, sort: 'updated', per_page: limit })}`)
+          if (!res.ok) return toolResult({ ok: false, status: res.status, error: githubError(res) })
+          const repos = Array.isArray(res.body) ? res.body.map(compactGithubItem) : []
+          return toolResult({ ok: true, total: repos.length, repos })
+        },
+      }
+    case 'github_get_repository':
+      return {
+        ...base,
+        parameters: Type.Object({ owner: Type.Optional(Type.String()), repo: Type.Optional(Type.String()) }),
+        execute: async (_i, a) => {
+          const ref = repoRef(readCredentials(record, skill), a)
+          if ('error' in ref) return toolResult({ ok: false, error: ref.error })
+          const res = await githubApi(record, skill, `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}`)
+          if (!res.ok) return toolResult({ ok: false, status: res.status, error: githubError(res) })
+          return toolResult({ ok: true, repository: compactGithubItem(res.body) })
+        },
+      }
+    case 'github_list_issues':
+      return {
+        ...base,
+        parameters: Type.Object({ owner: Type.Optional(Type.String()), repo: Type.Optional(Type.String()), state: Type.Optional(Type.String()), labels: Type.Optional(Type.String()), since: Type.Optional(Type.String()), limit: Type.Optional(Type.Number()) }),
+        execute: async (_i, a) => {
+          const args = a as any
+          const ref = repoRef(readCredentials(record, skill), args)
+          if ('error' in ref) return toolResult({ ok: false, error: ref.error })
+          const limit = Math.min(Number(args?.limit) || 30, 100)
+          const state = ['open', 'closed', 'all'].includes(String(args?.state)) ? String(args.state) : 'open'
+          const res = await githubApi(record, skill, `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/issues${queryString({ state, labels: args?.labels, since: args?.since, per_page: limit })}`)
+          if (!res.ok) return toolResult({ ok: false, status: res.status, error: githubError(res) })
+          const issues = Array.isArray(res.body) ? res.body.filter((item: any) => !item.pull_request).map(compactGithubItem) : []
+          return toolResult({ ok: true, total: issues.length, issues })
+        },
+      }
+    case 'github_get_issue':
+      return {
+        ...base,
+        parameters: Type.Object({ owner: Type.Optional(Type.String()), repo: Type.Optional(Type.String()), issueNumber: Type.Number() }),
+        execute: async (_i, a) => {
+          const args = a as any
+          const ref = repoRef(readCredentials(record, skill), args)
+          if ('error' in ref) return toolResult({ ok: false, error: ref.error })
+          const issueNumber = Number(args?.issueNumber)
+          if (!Number.isFinite(issueNumber)) return toolResult({ ok: false, error: 'issueNumber is required.' })
+          const res = await githubApi(record, skill, `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/issues/${issueNumber}`)
+          if (!res.ok) return toolResult({ ok: false, status: res.status, error: githubError(res) })
+          return toolResult({ ok: true, issue: compactGithubItem(res.body), body: (res.body as any)?.body })
+        },
+      }
+    case 'github_create_issue':
+      return {
+        ...base,
+        parameters: Type.Object({ owner: Type.Optional(Type.String()), repo: Type.Optional(Type.String()), title: Type.String(), body: Type.Optional(Type.String()), labels: Type.Optional(Type.Array(Type.String())), userConfirmed: Type.Optional(Type.Boolean()) }),
+        execute: async (_i, a) => {
+          const denied = requireConfirmed(a)
+          if (denied) return denied
+          const args = a as any
+          const ref = repoRef(readCredentials(record, skill), args)
+          if ('error' in ref) return toolResult({ ok: false, error: ref.error })
+          if (!String(args?.title ?? '').trim()) return toolResult({ ok: false, error: 'title is required.' })
+          const res = await githubApi(record, skill, `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/issues`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: String(args.title), body: String(args.body ?? ''), labels: asStringArray(args.labels) }),
+          })
+          if (!res.ok) return toolResult({ ok: false, status: res.status, error: githubError(res) })
+          return toolResult({ ok: true, issue: compactGithubItem(res.body) })
+        },
+      }
+    case 'github_comment_issue':
+      return {
+        ...base,
+        parameters: Type.Object({ owner: Type.Optional(Type.String()), repo: Type.Optional(Type.String()), issueNumber: Type.Number(), body: Type.String(), userConfirmed: Type.Optional(Type.Boolean()) }),
+        execute: async (_i, a) => {
+          const denied = requireConfirmed(a)
+          if (denied) return denied
+          const args = a as any
+          const ref = repoRef(readCredentials(record, skill), args)
+          if ('error' in ref) return toolResult({ ok: false, error: ref.error })
+          const issueNumber = Number(args?.issueNumber)
+          const body = String(args?.body ?? '').trim()
+          if (!Number.isFinite(issueNumber) || !body) return toolResult({ ok: false, error: 'issueNumber and body are required.' })
+          const res = await githubApi(record, skill, `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/issues/${issueNumber}/comments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ body }),
+          })
+          if (!res.ok) return toolResult({ ok: false, status: res.status, error: githubError(res) })
+          return toolResult({ ok: true, comment: compactGithubItem(res.body), body: (res.body as any)?.body })
+        },
+      }
+    case 'github_update_issue':
+      return {
+        ...base,
+        parameters: Type.Object({ owner: Type.Optional(Type.String()), repo: Type.Optional(Type.String()), issueNumber: Type.Number(), title: Type.Optional(Type.String()), body: Type.Optional(Type.String()), state: Type.Optional(Type.String()), labels: Type.Optional(Type.Array(Type.String())), userConfirmed: Type.Optional(Type.Boolean()) }),
+        execute: async (_i, a) => {
+          const denied = requireConfirmed(a)
+          if (denied) return denied
+          const args = a as any
+          const ref = repoRef(readCredentials(record, skill), args)
+          if ('error' in ref) return toolResult({ ok: false, error: ref.error })
+          const issueNumber = Number(args?.issueNumber)
+          if (!Number.isFinite(issueNumber)) return toolResult({ ok: false, error: 'issueNumber is required.' })
+          const patch: Record<string, unknown> = {}
+          if (typeof args?.title === 'string') patch.title = args.title
+          if (typeof args?.body === 'string') patch.body = args.body
+          if (args?.state === 'open' || args?.state === 'closed') patch.state = args.state
+          const labels = asStringArray(args?.labels)
+          if (labels) patch.labels = labels
+          if (!Object.keys(patch).length) return toolResult({ ok: false, error: 'Provide title, body, state, or labels to update.' })
+          const res = await githubApi(record, skill, `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/issues/${issueNumber}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch),
+          })
+          if (!res.ok) return toolResult({ ok: false, status: res.status, error: githubError(res) })
+          return toolResult({ ok: true, issue: compactGithubItem(res.body) })
+        },
+      }
     case 'notify':
       return { ...base, parameters: Type.Object({ message: Type.String() }),
         execute: async (_i, a) => {
@@ -541,6 +869,8 @@ function summarizeToolCall(tool: AgentTool, args: unknown): string {
   const parsed = isPlainObject(args) ? args : {}
   if (tool.name === 'patch_state') return 'Updating app state'
   if (tool.name.startsWith('gmail_')) return `Calling Gmail tool: ${tool.name}`
+  if (tool.name.startsWith('github_')) return `Calling GitHub tool: ${tool.name}`
+  if (tool.name.startsWith('http_')) return `Calling HTTP API tool: ${tool.name}`
   if (tool.name === 'load_miniapp_data') return 'Loading miniapp data source'
   if (tool.name.includes('database')) {
     const table = typeof parsed.table === 'string' ? ` (${parsed.table})` : ''

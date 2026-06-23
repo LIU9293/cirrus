@@ -315,7 +315,8 @@ app.post('/api/miniapps/:id/agent/refine', async (req, res) => {
 
 // The platform Skills Library (catalog).
 app.get('/api/skills/library', (_req, res) => {
-  res.json({ skills: PLATFORM_SKILLS })
+  const visible = new Set(['gmail', 'github', 'http_request', 'database'])
+  res.json({ skills: PLATFORM_SKILLS.filter((skill) => visible.has(skill.id)) })
 })
 
 // Analyse the app's goal and attach the planned skills (auto-add library matches,

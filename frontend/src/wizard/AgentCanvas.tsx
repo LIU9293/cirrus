@@ -34,11 +34,8 @@ import {
   X,
   Search,
   Globe,
-  Image,
   Bell,
-  Video,
   Github,
-  Folder,
 } from 'lucide-react'
 import type {
   BotPlatform,
@@ -84,6 +81,7 @@ import {
 } from '@/lib/api'
 import { MiniappCanvas, type MiniappCanvasHandle } from '@/canvas/MiniappCanvas'
 import { MessageResponse } from '@/components/ai-elements/message'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import type { UiMessage } from '@/chat/ChatPanel'
 import { cn } from '@/lib/utils'
 
@@ -98,7 +96,25 @@ export interface CanvasFlowUpdate {
   defineMessages?: MiniappRecord['defineMessages']
 }
 
-export type NavView = 'flow' | 'agents' | 'vms' | 'community'
+export type NavView = 'flow' | 'agents' | 'runtime' | 'community'
+
+const PAGE_CONTAINER_CLASS =
+  'relative z-10 mx-auto w-full max-w-[1080px] px-4 pb-16 pt-[92px] sm:px-6 sm:pb-20 sm:pt-[112px] lg:px-10 lg:pt-[116px]'
+const PAGE_HEADER_CLASS = 'flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between'
+const PAGE_GRID_CLASS = 'mt-6 grid grid-cols-1 gap-4 sm:mt-7 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3'
+
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const media = window.matchMedia(query)
+    const update = () => setMatches(media.matches)
+    update()
+    media.addEventListener?.('change', update)
+    return () => media.removeEventListener?.('change', update)
+  }, [query])
+  return matches
+}
 
 interface Props {
   miniapp: MiniappRecord
@@ -833,7 +849,7 @@ function skillNeedsCredentials(skill: MiniappSkill): boolean {
   const fields = skill.credentials ?? []
   if (!fields.length) return false
   const filled = new Set(skill.credentialsFilled ?? [])
-  return !fields.every((f) => filled.has(f.key))
+  return !fields.filter((f) => f.required !== false).every((f) => filled.has(f.key))
 }
 
 function SkillCredentialsPanel({
@@ -847,7 +863,8 @@ function SkillCredentialsPanel({
 }) {
   const fields = skill.credentials ?? []
   const filledKeys = skill.credentialsFilled ?? []
-  const allFilled = fields.length > 0 && fields.every((f) => filledKeys.includes(f.key))
+  const requiredFields = fields.filter((f) => f.required !== false)
+  const allFilled = requiredFields.length > 0 && requiredFields.every((f) => filledKeys.includes(f.key))
   const [values, setValues] = useState<Record<string, string>>({})
   const [editing, setEditing] = useState(!allFilled)
   const [busy, setBusy] = useState(false)
@@ -889,15 +906,38 @@ function SkillCredentialsPanel({
         <label key={field.key} className="flex flex-col gap-1">
           <span className="flex items-center gap-1.5 text-[11.5px] font-semibold text-ink-secondary">
             {field.label}
+            {field.required === false && <span className="text-ink-tertiary">optional</span>}
             {filledKeys.includes(field.key) && <span className="text-live">set</span>}
           </span>
-          <input
-            value={values[field.key] ?? ''}
-            onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
-            type={field.secret ? 'password' : 'text'}
-            placeholder={field.placeholder ?? (filledKeys.includes(field.key) ? 'Leave blank to keep current value' : '')}
-            className="h-9 rounded-[9px] border border-border-strong bg-white/80 px-3 text-[13px] text-ink outline-none focus:border-primary"
-          />
+          {field.type === 'select' ? (
+            <select
+              value={values[field.key] ?? ''}
+              onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
+              className="h-9 rounded-[9px] border border-border-strong bg-white/80 px-3 text-[13px] text-ink outline-none focus:border-primary"
+            >
+              <option value="">{field.placeholder ?? 'Select...'}</option>
+              {(field.options ?? []).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          ) : field.type === 'textarea' ? (
+            <textarea
+              value={values[field.key] ?? ''}
+              onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
+              placeholder={field.placeholder ?? (filledKeys.includes(field.key) ? 'Leave blank to keep current value' : '')}
+              className="min-h-[84px] resize-y rounded-[9px] border border-border-strong bg-white/80 px-3 py-2 text-[13px] text-ink outline-none focus:border-primary"
+            />
+          ) : (
+            <input
+              value={values[field.key] ?? ''}
+              onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
+              type={field.secret || field.type === 'password' ? 'password' : 'text'}
+              placeholder={field.placeholder ?? (filledKeys.includes(field.key) ? 'Leave blank to keep current value' : '')}
+              className="h-9 rounded-[9px] border border-border-strong bg-white/80 px-3 text-[13px] text-ink outline-none focus:border-primary"
+            />
+          )}
         </label>
       ))}
       <div className="flex items-center gap-2">
@@ -1438,7 +1478,7 @@ function SkillPanel({
   origin: DOMRect | null
   onClose: () => void
   onFront: () => void
-  onBuild?: (text: string) => void
+  onBuild?: (text: string, agentContent?: string) => void
   buildMessages?: UiMessage[]
   building?: boolean
   canvasRef?: React.Ref<MiniappCanvasHandle>
@@ -1567,13 +1607,19 @@ function SkillPanel({
       const history: ChatTurn[] = next
         .filter((m) => m.text !== scopedIntro)
         .map((m) => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.text }))
-      const out = skill ? await chatAboutSkill(appId, skill.id, history) : await chatAboutSurface(appId, 'miniapp', history)
-      if (skill && out.skill) {
-        onUpdateFlow({
-          skills: (miniapp.skills ?? []).map((s) => (s.id === out.skill!.id ? out.skill! : s)),
-        })
+      let reply = ''
+      if (skill) {
+        const out = await chatAboutSkill(appId, skill.id, history)
+        if (out.skill) {
+          onUpdateFlow({
+            skills: (miniapp.skills ?? []).map((s) => (s.id === out.skill!.id ? out.skill! : s)),
+          })
+        }
+        reply = out.reply
+      } else {
+        const out = await chatAboutSurface(appId, 'miniapp', history)
+        reply = out.reply
       }
-      const { reply } = out
       setChat((c) => [...c, { role: 'ai', text: reply }])
     } catch (e) {
       setChat((c) => [...c, { role: 'ai', text: `Sorry — ${String((e as Error)?.message ?? e)}` }])
@@ -2048,7 +2094,7 @@ function ToolCallCard({
 const NAV_ITEMS: { key: NavView; label: string; icon: React.ReactNode }[] = [
   { key: 'agents', label: 'My Agents', icon: <LayoutGrid className="size-[17px]" /> },
   { key: 'community', label: 'Community Agents', icon: <Users className="size-[17px]" /> },
-  { key: 'vms', label: 'Runtimes', icon: <Server className="size-[17px]" /> },
+  { key: 'runtime', label: 'Runtimes', icon: <Server className="size-[17px]" /> },
 ]
 
 export function HamburgerMenu({ onNavigate }: { onNavigate: (v: NavView) => void }) {
@@ -2063,10 +2109,10 @@ export function HamburgerMenu({ onNavigate }: { onNavigate: (v: NavView) => void
     return () => document.removeEventListener('pointerdown', onDown)
   }, [open])
   return (
-    <div ref={ref} data-no-pan className="absolute left-[32px] top-[42px] z-40">
+    <div ref={ref} data-no-pan className="absolute left-4 top-5 z-40 sm:left-[32px] sm:top-[42px]">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex size-[46px] items-center justify-center rounded-full border border-border bg-surface text-ink shadow-[0_6px_20px_-8px_rgba(25,25,23,0.18)] hover:bg-surface-muted"
+        className="flex size-11 items-center justify-center rounded-full border border-border bg-surface text-ink shadow-[0_6px_20px_-8px_rgba(25,25,23,0.18)] hover:bg-surface-muted sm:size-[46px]"
         aria-label="Menu"
       >
         <Menu className="size-5" />
@@ -2109,17 +2155,17 @@ export function MyAgentsPage({
   return (
     <div className="dot-bg relative h-full w-full overflow-auto">
       <HamburgerMenu onNavigate={onNavigate} />
-      <div className="relative z-10 mx-auto w-full max-w-[1080px] px-10 pb-20 pt-[116px]">
-        <div className="flex items-end justify-between">
+      <div className={PAGE_CONTAINER_CLASS}>
+        <div className={PAGE_HEADER_CLASS}>
           <h1 className="text-[28px] font-bold tracking-tight text-ink">My Agents</h1>
           <button
             onClick={onNew}
-            className="inline-flex items-center gap-1.5 rounded-[11px] bg-primary px-4 py-2.5 text-[13.5px] font-semibold text-primary-foreground hover:opacity-90"
+            className="inline-flex w-fit items-center gap-1.5 rounded-[11px] bg-primary px-4 py-2.5 text-[13.5px] font-semibold text-primary-foreground hover:opacity-90"
           >
             <Plus className="size-[15px]" /> New agent
           </button>
         </div>
-        <div className="mt-7 grid grid-cols-3 gap-5">
+        <div className={PAGE_GRID_CLASS}>
           {agents.map((a) => (
             <AgentCard key={a.id} agent={a} onClick={() => onOpen(a.id)} onRemove={() => onRemove(a.id)} />
           ))}
@@ -2172,7 +2218,7 @@ function AgentCard({ agent, onClick, onRemove }: { agent: MiniappRecord; onClick
         {skills > 0 && <span className="text-[11px] text-ink-tertiary">{skills} skills</span>}
 
         {/* hover actions — share the badge row so they're vertically centered with it */}
-        <div className="ml-auto flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="ml-auto flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
           <div className="relative">
             <button
               onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); setAddOpen(false) }}
@@ -2257,7 +2303,7 @@ function AddToRuntimeDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/30 p-6" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/30 p-4 sm:p-6" onMouseDown={onClose}>
       <div
         className="terr-pop flex max-h-[80vh] w-full max-w-[460px] flex-col overflow-hidden rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
         onMouseDown={(e) => e.stopPropagation()}
@@ -2336,7 +2382,16 @@ function AddToRuntimeDialog({
 
 /* ───────── Community ───────── */
 
-const COMMUNITY: { name: string; desc: string; tag: string; logoSrc: string; logoAlt: string; color: string }[] = [
+type CommunityAgent = {
+  name: string
+  desc: string
+  tag: string
+  logoSrc: string
+  logoAlt: string
+  color: string
+}
+
+const COMMUNITY: CommunityAgent[] = [
   {
     name: 'Hermes',
     desc: 'Multi-agent orchestration framework for complex, long-running workflows.',
@@ -2387,38 +2442,62 @@ const COMMUNITY: { name: string; desc: string; tag: string; logoSrc: string; log
   },
 ]
 
+function communityAgentRef(agent: CommunityAgent): RuntimeAgentRef {
+  return { key: `community:${agent.name}`, name: agent.name, source: 'community' }
+}
+
 export function CommunityPage({ onNavigate }: { onNavigate: (v: NavView) => void }) {
   return (
     <div className="dot-bg relative h-full w-full overflow-auto">
       <HamburgerMenu onNavigate={onNavigate} />
-      <div className="relative z-10 mx-auto w-full max-w-[1080px] px-10 pb-20 pt-[116px]">
+      <div className={PAGE_CONTAINER_CLASS}>
         <div>
           <h1 className="text-[28px] font-bold tracking-tight text-ink">Community Agents</h1>
           <p className="mt-1.5 text-[13.5px] text-ink-secondary">Agents shared by the community — open one to explore or fork.</p>
         </div>
-        <div className="mt-7 grid grid-cols-3 gap-5">
+        <div className={PAGE_GRID_CLASS}>
           {COMMUNITY.map((a) => (
-            <button
-              key={a.name}
-              className="flex min-h-[152px] flex-col gap-3 rounded-[16px] border border-border bg-white p-5 text-left shadow-[0_8px_24px_-12px_rgba(25,25,23,0.10)] transition-shadow hover:shadow-[0_12px_30px_-12px_rgba(25,25,23,0.18)]"
-            >
-              <div className="flex items-center gap-2.5">
-                <div
-                  className="flex size-[34px] items-center justify-center rounded-[9px] border border-black/[0.04]"
-                  style={{ background: `${a.color}14` }}
-                >
-                  <img src={a.logoSrc} alt={a.logoAlt} className="size-[22px] object-contain" draggable={false} />
-                </div>
-                <div className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{a.name}</div>
-              </div>
-              <div className="line-clamp-2 flex-1 text-[12.5px] leading-relaxed text-ink-secondary">{a.desc}</div>
-              <div className="flex items-center gap-2">
-                <span className="rounded-full bg-surface-muted px-2.5 py-1 text-[11px] font-semibold text-ink-secondary">{a.tag}</span>
-              </div>
-            </button>
+            <CommunityAgentCard key={a.name} agent={a} />
           ))}
         </div>
       </div>
+    </div>
+  )
+}
+
+function CommunityAgentCard({ agent }: { agent: CommunityAgent }) {
+  const [addOpen, setAddOpen] = useState(false)
+  const agentRef = communityAgentRef(agent)
+
+  return (
+    <div className="group relative flex min-h-[152px] flex-col gap-3 rounded-[16px] border border-border bg-white p-5 text-left shadow-[0_8px_24px_-12px_rgba(25,25,23,0.10)] transition-shadow hover:shadow-[0_12px_30px_-12px_rgba(25,25,23,0.18)]">
+      <div className="flex items-center gap-2.5">
+        <div
+          className="flex size-[34px] shrink-0 items-center justify-center rounded-[9px] border border-black/[0.04]"
+          style={{ background: `${agent.color}14` }}
+        >
+          <img src={agent.logoSrc} alt={agent.logoAlt} className="size-[22px] object-contain" draggable={false} />
+        </div>
+        <div className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{agent.name}</div>
+      </div>
+      <div className="line-clamp-2 flex-1 text-[12.5px] leading-relaxed text-ink-secondary">{agent.desc}</div>
+      <div className="flex items-center gap-2">
+        <span className="rounded-full bg-surface-muted px-2.5 py-1 text-[11px] font-semibold text-ink-secondary">{agent.tag}</span>
+        <button
+          onClick={() => setAddOpen(true)}
+          className="ml-auto flex size-7 items-center justify-center rounded-[8px] border border-border bg-surface text-ink-secondary opacity-100 shadow-sm transition hover:bg-surface-muted sm:opacity-0 sm:group-hover:opacity-100"
+          aria-label={`Add ${agent.name} to runtime`}
+          title="Add to runtime"
+        >
+          <Plus className="size-[15px]" />
+        </button>
+      </div>
+
+      {addOpen &&
+        createPortal(
+          <AddToRuntimeDialog agentRef={agentRef} agentName={agent.name} onClose={() => setAddOpen(false)} />,
+          document.body,
+        )}
     </div>
   )
 }
@@ -2513,8 +2592,8 @@ export function RuntimesPage({
   return (
     <div className="dot-bg relative h-full w-full overflow-auto">
       <HamburgerMenu onNavigate={onNavigate} />
-      <div className="relative z-10 mx-auto w-full max-w-[1080px] px-10 pb-20 pt-[116px]">
-        <div className="flex items-end justify-between">
+      <div className={PAGE_CONTAINER_CLASS}>
+        <div className={PAGE_HEADER_CLASS}>
           <div>
             <h1 className="text-[28px] font-bold tracking-tight text-ink">Runtimes</h1>
             <p className="mt-1.5 text-[13.5px] text-ink-secondary">A runtime hosts one or more agents in a live sandbox.</p>
@@ -2522,7 +2601,7 @@ export function RuntimesPage({
           {runtimes.length > 0 && (
             <button
               onClick={() => setCreating(true)}
-              className="inline-flex items-center gap-1.5 rounded-[11px] bg-primary px-4 py-2.5 text-[13.5px] font-semibold text-primary-foreground hover:opacity-90"
+              className="inline-flex w-fit items-center gap-1.5 rounded-[11px] bg-primary px-4 py-2.5 text-[13.5px] font-semibold text-primary-foreground hover:opacity-90"
             >
               <Plus className="size-[15px]" /> Create New
             </button>
@@ -2536,7 +2615,7 @@ export function RuntimesPage({
         ) : runtimes.length === 0 ? (
           <EmptyRuntimes onCreate={() => setCreating(true)} />
         ) : (
-          <div className="mt-7 grid grid-cols-3 gap-5">
+          <div className={PAGE_GRID_CLASS}>
             {runtimes.map((rt) => (
               <RuntimeCard
                 key={rt.id}
@@ -2559,16 +2638,27 @@ export function RuntimesPage({
 
       {/* Floating runtime windows (draggable / resizable / maximizable) */}
       {panels.map((p, i) => (
-        <RuntimeWindow
+        <ErrorBoundary
           key={p.id}
-          id={p.id}
-          index={i}
-          origin={p.origin}
-          agents={agents}
-          onClose={() => { closePanel(p.id); void refresh() }}
-          onFront={() => frontPanel(p.id)}
-          onChanged={() => void refresh()}
-        />
+          resetKey={p.id}
+          fallback={(error, errorInfo) => (
+            <RuntimeWindowErrorFallback
+              error={error}
+              errorInfo={errorInfo?.componentStack ?? undefined}
+              onClose={() => { closePanel(p.id); void refresh() }}
+            />
+          )}
+        >
+          <RuntimeWindow
+            id={p.id}
+            index={i}
+            origin={p.origin}
+            agents={agents}
+            onClose={() => { closePanel(p.id); void refresh() }}
+            onFront={() => frontPanel(p.id)}
+            onChanged={() => void refresh()}
+          />
+        </ErrorBoundary>
       ))}
 
       {creating &&
@@ -2620,7 +2710,7 @@ function StatusBadge({ status }: { status: RuntimeStatus }) {
 
 function EmptyRuntimes({ onCreate }: { onCreate: () => void }) {
   return (
-    <div className="mt-7 flex flex-col items-center justify-center gap-5 rounded-[20px] border border-dashed border-border-strong bg-white/40 py-20 text-center">
+    <div className="mt-7 flex flex-col items-center justify-center gap-5 rounded-[20px] border border-dashed border-border-strong bg-white/40 px-4 py-14 text-center sm:py-20">
       <div className="relative">
         <div className="terr-float flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-[#837DFF] text-primary-foreground shadow-[0_14px_34px_-10px_rgba(91,87,242,0.55)]">
           <Server className="size-7" />
@@ -2640,6 +2730,55 @@ function EmptyRuntimes({ onCreate }: { onCreate: () => void }) {
       >
         <Plus className="size-[15px]" /> Create New
       </button>
+    </div>
+  )
+}
+
+function RuntimeWindowErrorFallback({
+  error,
+  errorInfo,
+  onClose,
+}: {
+  error: Error
+  errorInfo?: string
+  onClose: () => void
+}) {
+  return (
+    <div className="fixed left-1/2 top-1/2 z-[140] w-[min(760px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[20px] border border-destructive/20 bg-surface shadow-[0_26px_64px_-14px_rgba(25,25,23,0.36)]">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-[9px] bg-destructive/10 text-destructive">
+            <AlertCircle className="size-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="text-[15px] font-bold tracking-tight text-ink">Runtime panel crashed</div>
+            <div className="text-[11.5px] text-ink-tertiary">The error is shown here instead of a blank panel.</div>
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          className="flex size-[30px] items-center justify-center rounded-lg border border-border hover:bg-surface-muted"
+          aria-label="Close"
+        >
+          <X className="size-4 text-ink-secondary" />
+        </button>
+      </div>
+      <div className="max-h-[58vh] overflow-auto p-4">
+        <div className="rounded-[12px] border border-destructive/20 bg-destructive/5 p-3">
+          <div className="text-[12px] font-semibold text-destructive">{error.name || 'Error'}</div>
+          <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-[11.5px] leading-relaxed text-ink">
+            {error.stack || error.message}
+          </pre>
+        </div>
+        {errorInfo && (
+          <div className="mt-3 rounded-[12px] border border-border bg-surface-muted/60 p-3">
+            <div className="text-[12px] font-semibold text-ink-secondary">React component stack</div>
+            <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-ink-tertiary">
+              {errorInfo}
+            </pre>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -2713,7 +2852,7 @@ function RuntimeCard({
               e.stopPropagation()
               setMenuOpen((v) => !v)
             }}
-            className="flex size-7 items-center justify-center rounded-md text-ink-tertiary opacity-0 transition hover:bg-surface-muted hover:text-ink-secondary group-hover:opacity-100 data-[open=true]:opacity-100"
+            className="flex size-7 items-center justify-center rounded-md text-ink-tertiary opacity-100 transition hover:bg-surface-muted hover:text-ink-secondary sm:opacity-0 sm:group-hover:opacity-100 data-[open=true]:opacity-100"
             data-open={menuOpen}
             aria-label="Runtime options"
           >
@@ -2851,7 +2990,7 @@ function CreateRuntimeDialog({
   const [selected, setSelected] = useState<Record<string, RuntimeAgentRef>>({})
 
   const own: RuntimeAgentRef[] = agents.map((a) => ({ key: 'own:' + a.id, name: agentName(a), source: 'own', miniappId: a.id }))
-  const community: RuntimeAgentRef[] = COMMUNITY.map((c) => ({ key: 'community:' + c.name, name: c.name, source: 'community' }))
+  const community: RuntimeAgentRef[] = COMMUNITY.map(communityAgentRef)
 
   const toggle = (ref: RuntimeAgentRef) =>
     setSelected((prev) => {
@@ -2865,12 +3004,12 @@ function CreateRuntimeDialog({
   const canCreate = picked.length > 0
 
   return (
-    <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/30 p-6" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/30 p-4 sm:p-6" onMouseDown={onClose}>
       <div
         className="terr-pop flex max-h-[80vh] w-full max-w-[520px] flex-col overflow-hidden rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+        <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div>
             <div className="text-[16px] font-bold tracking-tight text-ink">New Runtime</div>
             <div className="text-[12.5px] text-ink-secondary">Pick at least one agent for this runtime to run.</div>
@@ -2895,11 +3034,11 @@ function CreateRuntimeDialog({
           <AgentPickGroup title="Community agents" items={community} selected={selected} onToggle={toggle} />
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-border px-5 py-4">
+        <div className="flex flex-col gap-3 border-t border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-[12.5px] text-ink-secondary">
             {picked.length} agent{picked.length === 1 ? '' : 's'} selected
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
             <button onClick={onClose} className="rounded-[10px] px-3.5 py-2 text-[13px] font-semibold text-ink-secondary hover:bg-surface-muted">
               Cancel
             </button>
@@ -2936,7 +3075,7 @@ function AgentPickGroup({
       {items.length === 0 ? (
         <div className="rounded-[10px] border border-dashed border-border px-3 py-3 text-[12.5px] text-ink-tertiary">{empty}</div>
       ) : (
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {items.map((ref) => {
             const on = !!selected[ref.key]
             return (
@@ -2996,6 +3135,7 @@ function RuntimeWindow({
 }) {
   const [runtime, setRuntime] = useState<RuntimeRecord | null>(null)
   const [miniapp, setMiniapp] = useState<MiniappRecord | null>(null)
+  const [runtimeError, setRuntimeError] = useState<string | null>(null)
   const [tab, setTab] = useState<'chat' | 'bots' | 'details'>('chat')
   const [showMiniapp, setShowMiniapp] = useState(false)
   const [messages, setMessages] = useState<UiMessage[]>([])
@@ -3006,11 +3146,17 @@ function RuntimeWindow({
   // Load the runtime and (if it hosts a built own-agent) that agent's miniapp.
   useEffect(() => {
     let alive = true
-    void getRuntime(id).then((rt) => {
-      if (!alive) return
-      setRuntime(rt)
-      setMessages(rt.messages)
-    })
+    setRuntimeError(null)
+    void getRuntime(id)
+      .then((rt) => {
+        if (!alive) return
+        setRuntime(rt)
+        setMessages(rt.messages)
+      })
+      .catch((err) => {
+        if (!alive) return
+        setRuntimeError(String((err as Error)?.message ?? err))
+      })
     return () => { alive = false }
   }, [id])
 
@@ -3118,11 +3264,12 @@ function RuntimeWindow({
   const stagger = index * 26
   const rootRef = useRef<HTMLDivElement>(null)
   const [max, setMax] = useState(false)
+  const compactWindow = useMediaQuery('(max-width: 767px)')
 
   const [d, setD] = useState({ x: 0, y: 0 })
   const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null)
   const onHeaderDown = (e: React.PointerEvent) => {
-    if (max || (e.target as HTMLElement).closest('button')) return
+    if (compactWindow || max || (e.target as HTMLElement).closest('button')) return
     dragRef.current = { sx: e.clientX, sy: e.clientY, ox: d.x, oy: d.y }
     ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
   }
@@ -3136,6 +3283,7 @@ function RuntimeWindow({
   const [size, setSize] = useState({ w: 900, h: 560 })
   const sizeRef = useRef<{ sx: number; sy: number; sw: number; sh: number } | null>(null)
   const onResizeDown = (e: React.PointerEvent) => {
+    if (compactWindow) return
     e.stopPropagation()
     sizeRef.current = { sx: e.clientX, sy: e.clientY, sw: size.w, sh: size.h }
     ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
@@ -3150,6 +3298,7 @@ function RuntimeWindow({
   const [runtimeSplitW, setRuntimeSplitW] = useState(420)
   const runtimeSplitRef = useRef<{ sx: number; sw: number } | null>(null)
   const onRuntimeSplitDown = (e: React.PointerEvent) => {
+    if (compactWindow) return
     e.stopPropagation()
     runtimeSplitRef.current = { sx: e.clientX, sw: runtimeSplitW }
     ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
@@ -3184,25 +3333,32 @@ function RuntimeWindow({
     <div
       ref={rootRef}
       onPointerDown={(e) => { e.stopPropagation(); onFront() }}
-      className={cn('fixed z-[120] cursor-default select-text', max ? 'inset-x-6 top-[88px] bottom-6' : 'left-1/2 top-1/2')}
-      style={max ? undefined : { width: size.w, transform: `translate(calc(-50% + ${d.x + stagger}px), calc(-50% + ${d.y + stagger}px))` }}
+      className={cn(
+        'fixed z-[120] cursor-default select-text',
+        compactWindow
+          ? 'inset-x-2 bottom-2 top-2'
+          : max
+            ? 'inset-x-6 bottom-6 top-[88px]'
+            : 'left-1/2 top-1/2',
+      )}
+      style={compactWindow || max ? undefined : { width: size.w, transform: `translate(calc(-50% + ${d.x + stagger}px), calc(-50% + ${d.y + stagger}px))` }}
     >
       <div
-        className={cn('relative flex flex-col overflow-hidden rounded-[20px] border border-white/70 shadow-[0_26px_64px_-14px_rgba(25,25,23,0.36)]', max && 'h-full')}
-        style={{ ...(max ? {} : { height: size.h }), background: 'rgba(255,255,255,0.82)', backdropFilter: 'blur(26px)', WebkitBackdropFilter: 'blur(26px)' }}
+        className={cn('relative flex flex-col overflow-hidden rounded-[20px] border border-white/70 shadow-[0_26px_64px_-14px_rgba(25,25,23,0.36)]', (max || compactWindow) && 'h-full')}
+        style={{ ...(max || compactWindow ? {} : { height: size.h }), background: 'rgba(255,255,255,0.82)', backdropFilter: 'blur(26px)', WebkitBackdropFilter: 'blur(26px)' }}
       >
         {/* Title bar — drag anywhere (windowed mode) */}
         <div
           onPointerDown={onHeaderDown}
           onPointerMove={onHeaderMove}
           onPointerUp={onHeaderUp}
-          className={cn('flex select-none items-center gap-3 border-b border-black/5 px-4 py-3', !max && 'cursor-grab active:cursor-grabbing')}
+          className={cn('flex select-none items-center gap-3 border-b border-black/5 px-3 py-3 sm:px-4', !compactWindow && !max && 'cursor-grab active:cursor-grabbing')}
         >
           <div className="flex size-[34px] items-center justify-center rounded-[9px] bg-accent-soft text-accent-ink">
             <Server className="size-[17px]" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 items-center gap-2">
               <span className="truncate text-[15.5px] font-bold tracking-tight text-ink">{runtime?.name ?? 'Runtime'}</span>
               {runtime && <StatusBadge status={runtime.status} />}
             </div>
@@ -3231,8 +3387,8 @@ function RuntimeWindow({
         </div>
 
         {/* Tab bar */}
-        <div className="flex items-center gap-1 border-b border-black/5 px-3 py-2">
-          <div className="flex min-w-0 flex-1 items-center gap-1">
+        <div className="flex flex-wrap items-center gap-2 border-b border-black/5 px-3 py-2">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
             {tabs.filter((t) => t.show).map((t) => (
               <button
                 key={t.key}
@@ -3283,9 +3439,21 @@ function RuntimeWindow({
 
         {/* Tab content */}
         <div className="flex min-h-0 flex-1 flex-col">
-          {activeTab === 'chat' && (
-            <div className="flex min-h-0 flex-1">
-              <div className="flex min-h-0 min-w-0 flex-1">
+          {runtimeError ? (
+            <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+              <div className="max-w-lg rounded-[14px] border border-destructive/20 bg-destructive/5 p-4 text-left">
+                <div className="flex items-center gap-2 text-[13px] font-semibold text-destructive">
+                  <AlertCircle className="size-4" />
+                  Failed to load runtime
+                </div>
+                <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-[11.5px] leading-relaxed text-ink">
+                  {runtimeError}
+                </pre>
+              </div>
+            </div>
+          ) : activeTab === 'chat' && (
+            <div className={cn('flex min-h-0 flex-1', showMiniapp && hasRuntimeMiniapp && 'flex-col md:flex-row')}>
+              <div className={cn('flex min-h-0 min-w-0 flex-1', showMiniapp && hasRuntimeMiniapp && 'max-md:min-h-[240px]')}>
                 <BuildChat
                   title=""
                   placeholder="Message this runtime…"
@@ -3302,10 +3470,13 @@ function RuntimeWindow({
                     onPointerDown={onRuntimeSplitDown}
                     onPointerMove={onRuntimeSplitMove}
                     onPointerUp={onRuntimeSplitUp}
-                    className="w-1.5 shrink-0 cursor-col-resize bg-black/5 transition-colors hover:bg-primary/40"
+                    className="hidden w-1.5 shrink-0 cursor-col-resize bg-black/5 transition-colors hover:bg-primary/40 md:block"
                     aria-label="Resize runtime mini app split"
                   />
-                  <div className="flex min-h-0 min-w-[300px] shrink-0 flex-col border-l border-black/5 bg-white/50" style={{ width: runtimeSplitW }}>
+                  <div
+                    className="flex min-h-[280px] min-w-0 flex-1 flex-col border-t border-black/5 bg-white/50 md:min-h-0 md:min-w-[300px] md:shrink-0 md:flex-none md:border-l md:border-t-0"
+                    style={compactWindow ? undefined : { width: runtimeSplitW }}
+                  >
                     <div className="min-h-0 flex-1">
                       {miniapp ? (
                         <MiniappCanvas
@@ -3341,7 +3512,7 @@ function RuntimeWindow({
           onPointerDown={onResizeDown}
           onPointerMove={onResizeMove}
           onPointerUp={onResizeUp}
-          className="absolute bottom-0.5 right-0.5 flex size-4 cursor-nwse-resize items-center justify-center text-ink-tertiary"
+          className="absolute bottom-0.5 right-0.5 hidden size-4 cursor-nwse-resize items-center justify-center text-ink-tertiary sm:flex"
           aria-label="Resize"
         >
           <svg viewBox="0 0 10 10" className="size-2.5" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round">
@@ -3467,7 +3638,7 @@ function AgentRow({
         </div>
         <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-ink-tertiary">
           {install?.adapter && <span>{install.adapter}</span>}
-          {model?.mode && <span>model: {model.mode.replaceAll('_', ' ')}</span>}
+          {model?.mode && <span>model: {model.mode.replace(/_/g, ' ')}</span>}
           {model?.platformModel && <span>{model.platformModel}</span>}
           {model?.subscriptionProvider && <span>auth: {model.subscriptionProvider}</span>}
           {install?.error && <span className="text-destructive">{install.error}</span>}
@@ -3559,7 +3730,7 @@ function ModelConfigDialog({
         </div>
 
         <div className="flex flex-col gap-4 px-5 py-4">
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             {[
               { key: 'platform', label: 'Platform model', sub: 'Implemented' },
               { key: 'custom_llm_api', label: 'Own API', sub: 'Stored only' },
@@ -3693,9 +3864,7 @@ function AddAgentsDialog({
   const own: RuntimeAgentRef[] = agents
     .map((a) => ({ key: 'own:' + a.id, name: agentName(a), source: 'own' as const, miniappId: a.id }))
     .filter((r) => !existingKeys.has(r.key))
-  const community: RuntimeAgentRef[] = COMMUNITY.map((c) => ({ key: 'community:' + c.name, name: c.name, source: 'community' as const })).filter(
-    (r) => !existingKeys.has(r.key),
-  )
+  const community: RuntimeAgentRef[] = COMMUNITY.map(communityAgentRef).filter((r) => !existingKeys.has(r.key))
 
   const toggle = (ref: RuntimeAgentRef) =>
     setSelected((prev) => {
@@ -3708,7 +3877,7 @@ function AddAgentsDialog({
   const picked = Object.values(selected)
 
   return (
-    <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/30 p-6" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/30 p-4 sm:p-6" onMouseDown={onClose}>
       <div
         className="terr-pop flex max-h-[80vh] w-full max-w-[520px] flex-col overflow-hidden rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
         onMouseDown={(e) => e.stopPropagation()}
@@ -3728,11 +3897,11 @@ function AddAgentsDialog({
           <AgentPickGroup title="Community agents" empty="All community agents are already added." items={community} selected={selected} onToggle={toggle} />
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-border px-5 py-4">
+        <div className="flex flex-col gap-3 border-t border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-[12.5px] text-ink-secondary">
             {picked.length} agent{picked.length === 1 ? '' : 's'} selected
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
             <button onClick={onClose} className="rounded-[10px] px-3.5 py-2 text-[13px] font-semibold text-ink-secondary hover:bg-surface-muted">
               Cancel
             </button>
@@ -4172,7 +4341,19 @@ function BuildMsg({ m, working = false }: { m: UiMessage; working?: boolean }) {
         )}
         {m.content && (
           <div className="rounded-[14px] rounded-bl-[4px] bg-surface-muted px-3 py-2 text-[13px] leading-snug text-ink">
-            <MessageResponse>{m.content}</MessageResponse>
+            <ErrorBoundary
+              resetKey={m.id + ':' + m.content}
+              fallback={(error) => (
+                <div className="space-y-2">
+                  <div className="rounded-[10px] border border-amber-500/20 bg-amber-500/10 px-2.5 py-2 text-[11.5px] text-amber-700">
+                    Message markdown failed to render: {error.message}
+                  </div>
+                  <pre className="whitespace-pre-wrap break-words font-sans text-[13px] leading-snug text-ink">{m.content}</pre>
+                </div>
+              )}
+            >
+              <MessageResponse>{m.content}</MessageResponse>
+            </ErrorBoundary>
           </div>
         )}
       </div>
@@ -4250,6 +4431,7 @@ function platformToSkill(p: PlatformSkill): MiniappSkill {
     tools: p.tools ?? [],
     credentials: p.credentials ?? [],
     credentialsFilled: [],
+    config: p.config ? { ...p.config } : undefined,
   }
 }
 
@@ -4268,17 +4450,13 @@ function customSkill(desc: string): MiniappSkill {
   }
 }
 
-// The 8 platform skills from the design. `pid` maps to a backend platform skill
+// The platform skills from the design. `pid` maps to a backend platform skill
 // when one exists; otherwise we synthesize a built-in skill from the design entry.
 const DESIGN_SKILLS: { pid: string; name: string; desc: string; cat: MiniappSkill['category']; icon: React.ReactNode }[] = [
   { pid: 'gmail', name: 'Gmail', desc: 'Read & triage email', cat: 'connector', icon: <Mail className="size-[16px]" /> },
-  { pid: 'web_search', name: 'Web Search', desc: 'Search the live web', cat: 'tool', icon: <Search className="size-[16px]" /> },
   { pid: 'database', name: 'Database', desc: 'Store & query records', cat: 'data', icon: <Database className="size-[16px]" /> },
-  { pid: 'video_gen', name: 'Video Gen', desc: 'Generate videos', cat: 'ai', icon: <Video className="size-[16px]" /> },
   { pid: 'github', name: 'GitHub', desc: 'Manage repos & issues', cat: 'connector', icon: <Github className="size-[16px]" /> },
   { pid: 'http_request', name: 'HTTP API', desc: 'Call external APIs', cat: 'connector', icon: <Globe className="size-[16px]" /> },
-  { pid: 'image_generate', name: 'Image Gen', desc: 'Generate images', cat: 'ai', icon: <Image className="size-[16px]" /> },
-  { pid: 'file_storage', name: 'File Storage', desc: 'Store & serve files', cat: 'data', icon: <Folder className="size-[16px]" /> },
 ]
 
 function AddSkillsDialog({

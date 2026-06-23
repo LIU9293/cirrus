@@ -138,6 +138,117 @@ function agentDirName(key: string): string {
   return key.replace(/[^a-zA-Z0-9._-]+/g, '_')
 }
 
+function invokeSourceFor(definition: CommunityAgentDefinition): string {
+  return `
+export async function invoke(payload) {
+  const { model, agent, history } = payload;
+  const coding = agent.category === 'coding';
+  const baseSystem = [
+    agent.systemPrompt,
+    coding ? [
+      'You are a coding agent running inside this runtime sandbox.',
+      'The runtime filesystem is isolated to this E2B sandbox. Use /home/user/terr/workspace as the default workspace for repositories.',
+      'You have full coding tools for files and shell commands under /home/user/terr.',
+      'Use read_file/write_file/list_dir/run_command to inspect, edit, run tests, use git, push branches, and verify work.',
+      'Do not only describe commands when the user asked you to make a change; execute the work inside the sandbox.',
+    ].join('\\n') : '',
+  ].filter(Boolean).join('\\n');
+  const messages = [
+    { role: 'system', content: baseSystem },
+    ...(history || []).map((turn) => ({ role: turn.role, content: turn.content }))
+  ];
+  const tools = coding ? codingTools() : undefined;
+
+  for (let i = 0; i < (coding ? 14 : 1); i += 1) {
+    const res = await fetch(model.endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + model.apiKey },
+      body: JSON.stringify({
+        model: model.id,
+        messages,
+        ...(tools ? { tools, tool_choice: 'auto' } : {}),
+        max_completion_tokens: coding ? 1800 : 1000,
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) return { ok: false, error: JSON.stringify(data).slice(0, 1200) };
+    const msg = data?.choices?.[0]?.message ?? {};
+    const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+    messages.push({ role: 'assistant', content: msg.content ?? '', ...(toolCalls.length ? { tool_calls: toolCalls } : {}) });
+    if (!toolCalls.length) return { ok: true, reply: msg.content ?? '' };
+    for (const call of toolCalls) {
+      const result = await runTool(call.function?.name, call.function?.arguments);
+      messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result).slice(0, 12000) });
+    }
+  }
+  return { ok: true, reply: 'Stopped after the maximum tool iterations.' };
+}
+
+function codingTools() {
+  const obj = (properties) => ({ type: 'object', properties });
+  return [
+    { type: 'function', function: { name: 'list_dir', description: 'List files under /home/user/terr. Use /home/user/terr/workspace for repository workspaces.', parameters: obj({ path: { type: 'string' } }) } },
+    { type: 'function', function: { name: 'read_file', description: 'Read a UTF-8 text file under /home/user/terr.', parameters: obj({ path: { type: 'string' } }) } },
+    { type: 'function', function: { name: 'write_file', description: 'Write a UTF-8 text file under /home/user/terr, creating parent directories.', parameters: obj({ path: { type: 'string' }, content: { type: 'string' } }) } },
+    { type: 'function', function: { name: 'run_command', description: 'Run a shell command inside /home/user/terr or a subdirectory. Use this for development commands, git operations, tests, builds, and verification.', parameters: obj({ command: { type: 'string' }, cwd: { type: 'string' } }) } },
+  ];
+}
+
+async function runTool(name, rawArgs) {
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const cp = await import('node:child_process');
+  const args = rawArgs ? JSON.parse(rawArgs) : {};
+  const root = '/home/user/terr';
+  const safe = (input = '.') => {
+    const abs = path.resolve(root, String(input || '.').replace(/^\\/home\\/user\\/terr\\/?/, ''));
+    if (abs !== root && !abs.startsWith(root + path.sep)) throw new Error('Path escapes /home/user/terr');
+    return abs;
+  };
+  try {
+    if (name === 'list_dir') {
+      const dir = safe(args.path);
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      return { ok: true, path: dir, entries: entries.slice(0, 100).map((e) => ({ name: e.name, type: e.isDirectory() ? 'dir' : 'file' })) };
+    }
+    if (name === 'read_file') {
+      const file = safe(args.path);
+      const text = await fs.readFile(file, 'utf8');
+      return { ok: true, path: file, content: text.slice(0, 20000), truncated: text.length > 20000 };
+    }
+    if (name === 'write_file') {
+      const file = safe(args.path);
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.writeFile(file, String(args.content ?? ''), 'utf8');
+      return { ok: true, path: file, bytes: Buffer.byteLength(String(args.content ?? ''), 'utf8') };
+    }
+    if (name === 'run_command') {
+      const command = String(args.command ?? '').slice(0, 4000);
+      if (!command.trim()) return { ok: false, error: 'command is required' };
+      const cwd = safe(args.cwd || '.');
+      return await new Promise((resolve) => {
+        cp.exec(command, {
+          cwd,
+          timeout: 120000,
+          maxBuffer: 60000,
+          env: {
+            ...process.env,
+            HOME: '/home/user',
+            PATH: ['/home/user/terr/bin', process.env.PATH || '/usr/local/bin:/usr/bin:/bin'].join(':'),
+          },
+        }, (error, stdout, stderr) => {
+          resolve({ ok: !error, cwd, command, stdout: String(stdout || '').slice(0, 30000), stderr: String(stderr || '').slice(0, 12000), error: error ? String(error.message || error) : undefined });
+        });
+      });
+    }
+    return { ok: false, error: 'Unknown tool: ' + name };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+}
+`
+}
+
 function installCode(definition: CommunityAgentDefinition): string {
   const dir = `/home/user/terr/agents/${agentDirName(definition.key)}`
   const manifest = {
@@ -149,23 +260,7 @@ function installCode(definition: CommunityAgentDefinition): string {
     capabilities: definition.capabilities,
     installNotes: definition.installNotes,
   }
-  const invokeSource = `
-export async function invoke(payload) {
-  const { model, agent, history } = payload;
-  const messages = [
-    { role: 'system', content: agent.systemPrompt },
-    ...(history || []).map((turn) => ({ role: turn.role, content: turn.content }))
-  ];
-  const res = await fetch(model.endpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + model.apiKey },
-    body: JSON.stringify({ model: model.id, messages, max_completion_tokens: 900 })
-  });
-  const data = await res.json();
-  if (!res.ok) return { ok: false, error: JSON.stringify(data).slice(0, 1200) };
-  return { ok: true, reply: data?.choices?.[0]?.message?.content ?? '' };
-}
-`
+  const invokeSource = invokeSourceFor(definition)
   return [
     `await (async () => {`,
     `  const fs = await import('node:fs/promises');`,
@@ -191,6 +286,7 @@ function invokeCode(definition: CommunityAgentDefinition, history: ChatTurn[]): 
     agent: {
       key: definition.key,
       name: definition.name,
+      category: definition.category,
       systemPrompt: [
         definition.systemPrompt,
         '',

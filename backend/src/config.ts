@@ -28,7 +28,7 @@ export const config = {
   baseURL: process.env.OPENAI_BASE_URL ?? 'https://ai-relay.chainbot.io/v1',
   apiKey: process.env.OPENAI_API_KEY ?? '',
   model: process.env.MINIAPP_MODEL ?? 'gpt-5.5',
-  port: Number(process.env.PORT ?? 8787),
+  port: Number(process.env.PORT ?? 3000),
   // Repo roots, resolved from backend/src.
   repoRoot: resolve(here, '..', '..'),
   runtimeDir: resolve(here, '..', '..', 'miniapp-runtime'),

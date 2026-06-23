@@ -61,10 +61,10 @@ use:     iframe button ─postMessage→ host (useMiniappHost) ─HTTP→ /actio
 npm run install:all          # installs backend, frontend, miniapp-runtime
 
 cp backend/.env.example backend/.env   # then set OPENAI_API_KEY (relay key) — already templated
-# backend defaults: OPENAI_BASE_URL=https://ai-relay.chainbot.io/v1, MINIAPP_MODEL=gpt-5.5, PORT=8791
+# backend defaults: OPENAI_BASE_URL=https://ai-relay.chainbot.io/v1, MINIAPP_MODEL=gpt-5.5, PORT=3000
 
-npm run dev                  # backend on :8791, frontend on :5180 (frontend proxies /api)
-# open http://localhost:5180
+npm run dev                  # backend on :3000, frontend on Vite default :5173 (frontend proxies /api)
+# open http://localhost:5173
 ```
 
 Then: type "Build a todo list with a button that asks the agent to suggest starter

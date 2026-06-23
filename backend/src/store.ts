@@ -92,6 +92,7 @@ function hydrateBuiltinSkill(skill: MiniappSkill): MiniappSkill {
     kind: skill.kind ?? 'builtin',
     tools: platform.tools ?? skill.tools,
     credentials: platform.credentials ?? skill.credentials,
+    config: { ...(platform.config ?? {}), ...(skill.config ?? {}) },
   }
 }
 

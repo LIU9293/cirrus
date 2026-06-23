@@ -9,7 +9,7 @@ const tcpTargets: Array<[string, number]> = [
   ['ai-relay.chainbot.io', 443],
   ['8.8.8.8', 53],
   ['1.1.1.1', 443],
-  ['127.0.0.1', 5180],
+  ['127.0.0.1', 5173],
 ]
 
 function lookup(host: string) {

@@ -35,6 +35,7 @@ function planItemToSkill(item: SkillPlanItem): MiniappSkill {
       tools: platform.tools ?? [],
       credentials: platform.credentials ?? [],
       credentialsFilled: [],
+      config: platform.config ? { ...platform.config } : undefined,
     }
   }
   // Not in the library → a custom skill the creator builds to the same contract.
@@ -255,6 +256,16 @@ function sanitizeCredential(input: unknown): SkillCredentialField | null {
   return {
     key,
     label,
+    ...(input.type === 'password' || input.type === 'select' || input.type === 'textarea' || input.type === 'text' ? { type: input.type } : {}),
+    ...(Array.isArray(input.options)
+      ? {
+          options: input.options
+            .filter(isObject)
+            .map((o) => ({ label: String(o.label ?? o.value ?? ''), value: String(o.value ?? '') }))
+            .filter((o) => o.label && o.value),
+        }
+      : {}),
+    ...(input.required === false ? { required: false } : {}),
     secret: input.secret === true,
     ...(typeof input.placeholder === 'string' ? { placeholder: input.placeholder } : {}),
   }
@@ -456,6 +467,16 @@ export async function chatAboutSkill(
                     key: { type: 'string' },
                     label: { type: 'string' },
                     secret: { type: 'boolean' },
+                    type: { type: 'string', enum: ['text', 'password', 'select', 'textarea'] },
+                    options: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: { label: { type: 'string' }, value: { type: 'string' } },
+                        required: ['label', 'value'],
+                      },
+                    },
+                    required: { type: 'boolean' },
                     placeholder: { type: 'string' },
                   },
                   required: ['key', 'label'],

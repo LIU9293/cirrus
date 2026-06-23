@@ -896,7 +896,7 @@ function skillNeedsCredentials(skill: MiniappSkill): boolean {
   const fields = skill.credentials ?? []
   if (!fields.length) return false
   const filled = new Set(skill.credentialsFilled ?? [])
-  return !fields.every((f) => filled.has(f.key))
+  return !fields.filter((f) => f.required !== false).every((f) => filled.has(f.key))
 }
 
 /** Configure a skill's declared credentials. Secret values go to the agent folder. */
@@ -911,7 +911,8 @@ function CredentialsPanel({
 }) {
   const fields = skill.credentials ?? []
   const filledKeys = skill.credentialsFilled ?? []
-  const allFilled = fields.every((f) => filledKeys.includes(f.key))
+  const requiredFields = fields.filter((f) => f.required !== false)
+  const allFilled = requiredFields.length > 0 && requiredFields.every((f) => filledKeys.includes(f.key))
   const [values, setValues] = useState<Record<string, string>>({})
   const [editing, setEditing] = useState(!allFilled)
   const [busy, setBusy] = useState(false)
@@ -955,15 +956,38 @@ function CredentialsPanel({
         <label key={f.key} className="flex flex-col gap-1">
           <span className="text-[11px] font-medium text-foreground">
             {f.label}
+            {f.required === false && <span className="ml-1.5 text-muted-foreground">optional</span>}
             {filledKeys.includes(f.key) && <span className="ml-1.5 text-emerald-600">✓ set</span>}
           </span>
-          <input
-            value={values[f.key] ?? ''}
-            onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-            type={f.secret ? 'password' : 'text'}
-            placeholder={f.placeholder ?? (filledKeys.includes(f.key) ? '•••••• (leave blank to keep)' : '')}
-            className="rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary"
-          />
+          {f.type === 'select' ? (
+            <select
+              value={values[f.key] ?? ''}
+              onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+              className="rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary"
+            >
+              <option value="">{f.placeholder ?? 'Select...'}</option>
+              {(f.options ?? []).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          ) : f.type === 'textarea' ? (
+            <textarea
+              value={values[f.key] ?? ''}
+              onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+              placeholder={f.placeholder ?? (filledKeys.includes(f.key) ? 'Leave blank to keep current value' : '')}
+              className="min-h-[84px] resize-y rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary"
+            />
+          ) : (
+            <input
+              value={values[f.key] ?? ''}
+              onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+              type={f.secret || f.type === 'password' ? 'password' : 'text'}
+              placeholder={f.placeholder ?? (filledKeys.includes(f.key) ? '•••••• (leave blank to keep)' : '')}
+              className="rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary"
+            />
+          )}
         </label>
       ))}
       <div className="flex items-center gap-2">

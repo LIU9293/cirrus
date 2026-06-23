@@ -138,6 +138,11 @@ export interface SkillCredentialField {
   /** Stable key, e.g. "app_password". */
   key: string
   label: string
+  /** Render hint for the credential form. */
+  type?: 'text' | 'password' | 'select' | 'textarea'
+  options?: { label: string; value: string }[]
+  /** Defaults to true. Optional fields can be left blank without blocking readiness. */
+  required?: boolean
   /** Masked in the UI, stored in secrets, never returned to client/model. */
   secret?: boolean
   placeholder?: string
@@ -161,6 +166,8 @@ export interface PlatformSkill {
   tools?: SkillToolCall[]
   /** Credentials the user must configure when adding it. */
   credentials?: SkillCredentialField[]
+  /** Default instance config copied when this platform skill is attached. */
+  config?: Record<string, unknown>
 }
 
 /** Where a skill instance on a miniapp came from. */

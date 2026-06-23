@@ -19,7 +19,12 @@ import {
 import { ChatPanel, type UiMessage } from '@/chat/ChatPanel'
 import { MiniappCanvas, type MiniappCanvasHandle } from '@/canvas/MiniappCanvas'
 import { CreationWizard, type WizardFlowUpdate } from '@/wizard/CreationWizard'
-import { AgentCanvas, MyAgentsPage, CommunityPage, RuntimesPage, type NavView } from '@/wizard/AgentCanvas'
+import type { NavView } from '@/wizard/AgentCanvas'
+import { ROUTES, viewFromPath } from '@/routes'
+import { AgentFlowPage } from '@/pages/AgentFlowPage'
+import { AgentPage } from '@/pages/AgentPage'
+import { CommunityAgentsPage } from '@/pages/CommunityAgentsPage'
+import { RuntimePage } from '@/pages/RuntimePage'
 
 export type StudioMode = 'dev' | 'live'
 
@@ -39,7 +44,7 @@ export function App() {
   const [streaming, setStreaming] = useState(false)
   const [liveStreaming, setLiveStreaming] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
-  const [view, setView] = useState<NavView>('flow')
+  const [view, setView] = useState<NavView>(() => viewFromPath(window.location.pathname))
   const [mode, setMode] = useState<StudioMode>('dev')
   const [chatWidth, setChatWidth] = useState<number | null>(null)
   const [resizing, setResizing] = useState(false)
@@ -52,6 +57,28 @@ export function App() {
   const liveMessagesRef = useRef<UiMessage[]>([])
   messagesRef.current = messages
   liveMessagesRef.current = liveMessages
+
+  const navigate = useCallback((next: NavView, replace = false) => {
+    const path = ROUTES[next]
+    if (window.location.pathname !== path) {
+      const method = replace ? 'replaceState' : 'pushState'
+      window.history[method]({}, '', path)
+    }
+    setView(next)
+  }, [])
+
+  useEffect(() => {
+    const onPopState = () => setView(viewFromPath(window.location.pathname))
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  useEffect(() => {
+    const normalized = ROUTES[viewFromPath(window.location.pathname)]
+    if (window.location.pathname !== normalized) {
+      window.history.replaceState({}, '', normalized)
+    }
+  }, [])
 
   const setActiveMiniapp = useCallback((record: MiniappRecord) => {
     messagesHydratedForRef.current = record.id
@@ -120,14 +147,14 @@ export function App() {
 
   const openAgent = useCallback(async (id: string) => {
     setActiveMiniapp(await getMiniapp(id))
-    setView('flow')
-  }, [setActiveMiniapp])
+    navigate('flow')
+  }, [navigate, setActiveMiniapp])
 
   const newAgent = useCallback(async () => {
     setActiveMiniapp(await createMiniapp())
-    setView('flow')
+    navigate('flow')
     void refreshList()
-  }, [refreshList, setActiveMiniapp])
+  }, [navigate, refreshList, setActiveMiniapp])
 
   const handleDelete = useCallback(
     async (id: string) => {
@@ -377,18 +404,18 @@ export function App() {
     [miniapp, liveStreaming],
   )
 
-  // Top-level navigation (menu → My Agents / VMs / Community; else the agent flow).
+  // Top-level navigation (URL routes: /agent, /community, /runtime, /new; / redirects to /agent).
   if (view === 'agents') {
-    return <MyAgentsPage agents={list} onOpen={openAgent} onNew={newAgent} onRemove={handleDelete} onNavigate={setView} />
+    return <AgentPage agents={list} onOpen={openAgent} onNew={newAgent} onRemove={handleDelete} onNavigate={navigate} />
   }
-  if (view === 'vms') return <RuntimesPage agents={list} onNavigate={setView} />
-  if (view === 'community') return <CommunityPage onNavigate={setView} />
+  if (view === 'runtime') return <RuntimePage agents={list} onNavigate={navigate} />
+  if (view === 'community') return <CommunityAgentsPage onNavigate={navigate} />
   if (miniapp) {
     return (
-      <AgentCanvas
+      <AgentFlowPage
         miniapp={miniapp}
         onUpdateFlow={updateFlow}
-        onNavigate={setView}
+        onNavigate={navigate}
         onBuild={handleSend}
         buildMessages={messages}
         building={streaming}

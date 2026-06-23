@@ -6,12 +6,38 @@
       "key": "own:app-hqvpst-5j22",
       "name": "趣味背单词挑战",
       "source": "own",
-      "miniappId": "app-hqvpst-5j22"
+      "miniappId": "app-hqvpst-5j22",
+      "modelConfig": {
+        "mode": "platform",
+        "platformModel": "gpt-5.5",
+        "authStatus": "authorized"
+      },
+      "installation": {
+        "status": "ready",
+        "adapter": "terr-own-agent",
+        "version": "0.1.0"
+      }
     },
     {
       "key": "community:Hermes",
       "name": "Hermes",
-      "source": "community"
+      "source": "community",
+      "modelConfig": {
+        "mode": "platform",
+        "platformModel": "gpt-5.5",
+        "authStatus": "authorized"
+      },
+      "capabilities": [
+        "multi-agent coordination",
+        "workflow planning",
+        "handoff routing",
+        "status synthesis"
+      ],
+      "installation": {
+        "status": "not_installed",
+        "adapter": "platform-llm-adapter",
+        "version": "0.1.0"
+      }
     }
   ],
   "status": "stopped",
@@ -82,5 +108,5 @@
     }
   ],
   "createdAt": "2026-06-22T01:49:17.436Z",
-  "updatedAt": "2026-06-22T09:45:46.789Z"
+  "updatedAt": "2026-06-22T20:34:55.769Z"
 }
