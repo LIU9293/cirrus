@@ -206,6 +206,26 @@ export async function loadDataset(
   )
 }
 
+export async function agentImportDataset(
+  id: string,
+  input: {
+    skillId: string
+    text?: string
+    url?: string
+    table?: string
+    mode?: 'replace' | 'append'
+    instruction?: string
+  },
+): Promise<DatasetLoadResult & { importerCode?: string; notes?: string }> {
+  return json<DatasetLoadResult & { importerCode?: string; notes?: string }>(
+    await fetch(`/api/miniapps/${id}/datastore/agent-import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }),
+  )
+}
+
 export async function listDatastoreTables(id: string): Promise<DatastoreTableInfo[]> {
   const data = await json<{ tables: DatastoreTableInfo[] }>(await fetch(`/api/miniapps/${id}/datastore/tables`))
   return data.tables

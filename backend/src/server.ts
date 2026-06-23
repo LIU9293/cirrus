@@ -29,7 +29,7 @@ import { getRuntimeSandboxStatus, provisionRuntimeSandbox } from './sandbox/runt
 import { startScheduler } from './scheduler.ts'
 import { normalizeRuntimeAgentRef } from './communityAgents.ts'
 import { clarifyConcept } from './define/clarify.ts'
-import { loadDataset, queryDataset, listTables } from './datastore/load.ts'
+import { agentImportDataset, loadDataset, queryDataset, listTables } from './datastore/load.ts'
 import { diagnoseRuntimeGmail, diagnoseRuntimeNetwork } from './runtimeDiagnostics.ts'
 import type { SkillDevelopMethod } from '../../shared/protocol.ts'
 import {
@@ -218,6 +218,32 @@ app.post('/api/miniapps/:id/datastore/load', async (req, res) => {
     idPrefix: body.idPrefix ? String(body.idPrefix) : undefined,
   })
   res.json(result)
+})
+
+app.post('/api/miniapps/:id/datastore/agent-import', async (req, res) => {
+  const record = await loadRecord(req.params.id)
+  if (!record) return res.status(404).json({ error: 'not found' })
+  const body = req.body ?? {}
+  const sourceUrl = typeof body.url === 'string' ? body.url.trim() : ''
+  let text = String(body.text ?? '')
+  if (sourceUrl) {
+    const fetched = await fetchDatasetSource(sourceUrl)
+    if (!fetched.ok) return res.json(fetched)
+    text = fetched.text
+  }
+  try {
+    const result = await agentImportDataset(record, {
+      skillId: String(body.skillId ?? ''),
+      text,
+      table: body.table ? String(body.table) : undefined,
+      mode: body.mode === 'append' ? 'append' : 'replace',
+      instruction: body.instruction ? String(body.instruction) : undefined,
+      sourceUrl: sourceUrl || undefined,
+    })
+    res.json(result)
+  } catch (err) {
+    res.json({ ok: false, message: `Agent import failed: ${String((err as Error)?.message ?? err)}` })
+  }
 })
 
 const DATASET_SOURCE_MAX_BYTES = 5 * 1024 * 1024

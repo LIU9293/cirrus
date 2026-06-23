@@ -91,7 +91,7 @@ import {
   saveRuntimeAgentSkillSettings,
   getCommunityUsage,
   getMiniapp,
-  loadDataset,
+  agentImportDataset,
   updateMiniappSettings,
   listPublishedAgents,
   type PublishedAgent,
@@ -1168,14 +1168,6 @@ function DatabaseSkillDiagnostics({ appId }: { appId: string }) {
   )
 }
 
-function parseDatasetConstants(value: string): Record<string, unknown> | undefined {
-  const trimmed = value.trim()
-  if (!trimmed) return undefined
-  const parsed = JSON.parse(trimmed)
-  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') throw new Error('Constants must be a JSON object.')
-  return parsed as Record<string, unknown>
-}
-
 function DatasetSkillLoader({
   appId,
   skill,
@@ -1186,16 +1178,11 @@ function DatasetSkillLoader({
   onUpdate: (partial: Partial<MiniappSkill>) => void
 }) {
   const [sourceMode, setSourceMode] = useState<'url' | 'paste'>('url')
-  const [format, setFormat] = useState<'csv' | 'json' | 'text'>('csv')
   const [mode, setMode] = useState<'replace' | 'append'>('replace')
   const [sourceUrl, setSourceUrl] = useState('')
   const [text, setText] = useState('')
   const [table, setTable] = useState((skill.config?.table as string | undefined) ?? '')
-  const [pattern, setPattern] = useState('')
-  const [columns, setColumns] = useState('')
-  const [constants, setConstants] = useState('')
-  const [idColumn, setIdColumn] = useState('')
-  const [idPrefix, setIdPrefix] = useState('')
+  const [instruction, setInstruction] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -1212,24 +1199,11 @@ function DatasetSkillLoader({
       const inputText = text.trim()
       if (sourceMode === 'url' && !trimmedUrl) throw new Error('Source URL is required.')
       if (sourceMode === 'paste' && !inputText) throw new Error('Dataset input is empty.')
-      const columnList = columns.split(/[\n,]/).map((column) => column.trim()).filter(Boolean)
-      const constantValues = parseDatasetConstants(constants)
-      if (format === 'text') {
-        if (!pattern.trim()) throw new Error('Text imports require a regex pattern.')
-        if (!columnList.length) throw new Error('Text imports require at least one column.')
-      }
-      const result = await loadDataset(appId, {
+      const result = await agentImportDataset(appId, {
         skillId: skill.id,
-        format,
         mode,
         table: table.trim() || undefined,
-        ...(format === 'text' ? {
-          pattern,
-          columns: columnList,
-          constants: constantValues,
-          idColumn: idColumn.trim() || undefined,
-          idPrefix: idPrefix.trim() || undefined,
-        } : {}),
+        instruction: instruction.trim() || undefined,
         ...(sourceMode === 'url' ? { url: trimmedUrl } : { text }),
       })
       if (!result.ok) throw new Error(result.message)
@@ -1253,8 +1227,8 @@ function DatasetSkillLoader({
       <div className="flex items-center gap-2">
         <Database className="size-4 text-ink-secondary" />
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-semibold text-ink">Dataset import</div>
-          <div className="mt-0.5 text-[11.5px] text-ink-tertiary">Load CSV, JSON, or regex-parsed text into this agent datastore.</div>
+          <div className="text-[13px] font-semibold text-ink">Agent dataset import</div>
+          <div className="mt-0.5 text-[11.5px] text-ink-tertiary">Give the agent a source and goal; it writes and runs the importer script.</div>
         </div>
       </div>
       {loadedTable && (
@@ -1286,18 +1260,6 @@ function DatasetSkillLoader({
             ))}
           </div>
           <div className="inline-flex rounded-md bg-surface-muted p-0.5">
-            {(['csv', 'json', 'text'] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => setFormat(option)}
-                className={cn('rounded px-2.5 py-1 text-[11.5px] font-medium uppercase', format === option ? 'bg-white shadow-sm text-ink' : 'text-ink-tertiary')}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-          <div className="inline-flex rounded-md bg-surface-muted p-0.5">
             {(['replace', 'append'] as const).map((option) => (
               <button
                 key={option}
@@ -1325,7 +1287,7 @@ function DatasetSkillLoader({
             <input
               value={sourceUrl}
               onChange={(event) => setSourceUrl(event.target.value)}
-              placeholder={format === 'text' ? 'https://example.com/data.txt' : 'https://example.com/data.csv'}
+              placeholder="https://example.com/dataset.txt"
               className="rounded-md border border-border bg-white/80 px-2.5 py-2 font-mono text-[11px] text-ink outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
             />
           </label>
@@ -1335,65 +1297,22 @@ function DatasetSkillLoader({
             <textarea
               value={text}
               onChange={(event) => setText(event.target.value)}
-              placeholder={format === 'csv' ? 'name,category,value\nexample,default,...' : format === 'json' ? '[{\"name\":\"example\",\"category\":\"default\"}]' : 'word /phonetic/ definition'}
+              placeholder="Paste the raw dataset here."
               rows={5}
               className="resize-none rounded-md border border-border bg-white/80 px-2.5 py-2 font-mono text-[11px] text-ink outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
             />
           </label>
         )}
-        {format === 'text' && (
-          <div className="grid grid-cols-1 gap-2">
-            <label className="flex flex-col gap-1">
-              <span className="font-mono text-[10.5px] text-ink-tertiary">regex pattern</span>
-              <textarea
-                value={pattern}
-                onChange={(event) => setPattern(event.target.value)}
-                placeholder="^([A-Za-z-]+)\\s+(.+)$"
-                rows={3}
-                className="resize-none rounded-md border border-border bg-white/80 px-2.5 py-2 font-mono text-[11px] text-ink outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="font-mono text-[10.5px] text-ink-tertiary">columns</span>
-              <input
-                value={columns}
-                onChange={(event) => setColumns(event.target.value)}
-                placeholder="word, phonetic, definition"
-                className="rounded-md border border-border bg-white/80 px-2.5 py-2 font-mono text-[11px] text-ink outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="font-mono text-[10.5px] text-ink-tertiary">constants JSON</span>
-              <textarea
-                value={constants}
-                onChange={(event) => setConstants(event.target.value)}
-                placeholder='{"source":"library"}'
-                rows={3}
-                className="resize-none rounded-md border border-border bg-white/80 px-2.5 py-2 font-mono text-[11px] text-ink outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
-              />
-            </label>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <label className="flex flex-col gap-1">
-                <span className="font-mono text-[10.5px] text-ink-tertiary">generated id column</span>
-                <input
-                  value={idColumn}
-                  onChange={(event) => setIdColumn(event.target.value)}
-                  placeholder="id"
-                  className="rounded-md border border-border bg-white/80 px-2.5 py-2 font-mono text-[11px] text-ink outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="font-mono text-[10.5px] text-ink-tertiary">id prefix</span>
-                <input
-                  value={idPrefix}
-                  onChange={(event) => setIdPrefix(event.target.value)}
-                  placeholder="dataset"
-                  className="rounded-md border border-border bg-white/80 px-2.5 py-2 font-mono text-[11px] text-ink outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
-                />
-              </label>
-            </div>
-          </div>
-        )}
+        <label className="flex flex-col gap-1">
+          <span className="font-mono text-[10.5px] text-ink-tertiary">import instruction</span>
+          <textarea
+            value={instruction}
+            onChange={(event) => setInstruction(event.target.value)}
+            placeholder="Describe what this dataset contains and the row shape you want."
+            rows={4}
+            className="resize-none rounded-md border border-border bg-white/80 px-2.5 py-2 text-[12px] leading-relaxed text-ink outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
+          />
+        </label>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
@@ -1403,7 +1322,7 @@ function DatasetSkillLoader({
           className="inline-flex h-8 items-center gap-1.5 rounded-[9px] bg-primary px-3 text-[12px] font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
         >
           {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
-          Import dataset
+          Ask agent to import
         </button>
         {message && <span className="text-[12px] text-live">{message}</span>}
         {error && <span className="text-[12px] text-amber-700">{error}</span>}

@@ -102,9 +102,9 @@ export function PublicRuntimeChat({ id }: { id: string }) {
           )}
         </header>
 
-        {/* Body: chat, optionally split with the mini app */}
-        <div className={cn('mb-4 flex min-h-0 flex-1 gap-3', splitView ? 'flex-col md:flex-row' : 'flex-col')}>
-          <div className={cn('flex min-h-0 min-w-0 overflow-hidden rounded-[18px] border border-border bg-surface/70 shadow-[0_18px_50px_-24px_rgba(25,25,23,0.28)] backdrop-blur-xl', splitView ? 'flex-1 max-md:min-h-[260px]' : 'flex-1')}>
+        {/* One card holding both: chat is a small side panel, the mini app fills the rest. */}
+        <div className="mb-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[18px] border border-border bg-surface shadow-[0_18px_50px_-24px_rgba(25,25,23,0.28)] md:flex-row">
+          <div className={cn('flex min-h-0 min-w-0', splitView ? 'shrink-0 border-b border-border max-md:h-[42%] md:w-[360px] md:border-b-0 md:border-r' : 'flex-1')}>
             <BuildChat
               title=""
               placeholder={`Message ${runtime?.name ?? 'this runtime'}…`}
@@ -117,19 +117,22 @@ export function PublicRuntimeChat({ id }: { id: string }) {
             />
           </div>
           {splitView && (
-            <div className="flex min-h-[280px] min-w-0 flex-1 overflow-hidden rounded-[18px] border border-border bg-white shadow-[0_18px_50px_-24px_rgba(25,25,23,0.28)] md:min-h-0">
-              <MiniappCanvas
-                miniapp={miniapp}
-                runtimeId={id}
-                public
-                onState={(state, version) => setMiniapp((prev) => (prev ? { ...prev, state, stateVersion: version } : prev))}
-                chrome={false}
-                canSelectElements={false}
-                selectingElement={false}
-                selectedElement={null}
-                onToggleElementSelect={() => {}}
-                onElementSelected={() => {}}
-              />
+            <div className="flex min-h-0 min-w-0 flex-1 justify-center bg-white">
+              {/* The app is a fixed-width design; center it so the extra room reads cleanly. */}
+              <div className="h-full w-full max-w-[560px]">
+                <MiniappCanvas
+                  miniapp={miniapp}
+                  runtimeId={id}
+                  public
+                  onState={(state, version) => setMiniapp((prev) => (prev ? { ...prev, state, stateVersion: version } : prev))}
+                  chrome={false}
+                  canSelectElements={false}
+                  selectingElement={false}
+                  selectedElement={null}
+                  onToggleElementSelect={() => {}}
+                  onElementSelected={() => {}}
+                />
+              </div>
             </div>
           )}
         </div>

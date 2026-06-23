@@ -27,7 +27,7 @@ const LocalDriver: SandboxDriver = {
   runCode(code, opts) {
     const timeout = opts?.timeoutMs ?? 10_000
     return new Promise((resolve) => {
-      execFile('node', ['--input-type=module', '-e', code], { timeout, maxBuffer: 1 << 20 }, (err, stdout, stderr) => {
+      execFile('node', ['--input-type=module', '-e', code], { timeout, maxBuffer: 10 << 20 }, (err, stdout, stderr) => {
         if (err && (err as any).killed) {
           resolve({ ok: false, stdout: stdout ?? '', stderr: stderr ?? '', error: `Timed out after ${timeout}ms` })
           return
