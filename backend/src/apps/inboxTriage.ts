@@ -43,7 +43,7 @@ async function recordOperation(
 }
 
 async function fetchMock(record: MiniappRecord): Promise<Email[]> {
-  const code = readAgentFile(record.id, 'tools/gmail_fetch.ts')
+  const code = await readAgentFile(record.id, 'tools/gmail_fetch.ts')
   if (!code) return []
   const run = await getSandboxDriver().runCode(code, { timeoutMs: 20_000 })
   if (!run.ok) return []

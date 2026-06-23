@@ -85,10 +85,9 @@ function applyQuery(rows: Record<string, unknown>[], spec: QuerySpec) {
 
 // ---- Local driver: JSON file per table under the instance dir ----
 function dsDir(instanceId: string) {
-  // instanceId is already path-safe (app-xxxx-xxxx); keep it raw so the datastore
-  // lives under the app's own folder (matching store.ts / agentfs.ts), not a
-  // mangled sibling. safe() is only for table file names / SQL identifiers.
-  return join(config.dataDir, 'miniapps', instanceId, 'datastore')
+  // instanceId is already path-safe (app-xxxx-xxxx). Local driver only — kept on
+  // disk under data/datastore/<id> until the datastore moves to the pg driver.
+  return join(config.dataDir, 'datastore', instanceId)
 }
 function tablePath(instanceId: string, table: string) {
   return join(dsDir(instanceId), `${safe(table)}.json`)

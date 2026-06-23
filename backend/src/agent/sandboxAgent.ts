@@ -169,6 +169,7 @@ export async function runRuntimeAgentLoopInSandbox(
   sandboxId: string,
   system: string,
   history: ChatTurn[],
+  binding?: { runtimeId?: string; agentKey?: string },
 ): Promise<SandboxRuntimeAgentResult> {
   const activities: DeveloperChatActivity[] = [{ kind: 'status', text: 'Running TerrRuntimeAgent loop in E2B sandbox…' }]
   const userTurn = history.at(-1)
@@ -177,7 +178,7 @@ export async function runRuntimeAgentLoopInSandbox(
   }
 
   const [{ Type }] = await Promise.all([import('@earendil-works/pi-ai')])
-  const runtimeTools = makeRuntimeTools(Type as any, record, {
+  const runtimeTools = await makeRuntimeTools(Type as any, record, { record, ...binding }, {
     onActivity: (activity) => {
       const mapped = mapActivity(activity)
       if (mapped) activities.push(mapped)

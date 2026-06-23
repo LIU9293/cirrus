@@ -9,6 +9,7 @@ import { readAgentFile, listAgentTree, writeAgentFile } from '../agentfs.ts'
 import { runInboxTriage } from '../apps/inboxTriage.ts'
 import { fetchGmailLive, modifyGmailLive, type GmailModifyInput, type GmailSearchInput } from '../apps/gmailFetch.ts'
 import { findPlatformSkill } from '../skills/library.ts'
+import { resolveSkillSettings, type ResolvedSkillSettings, type SkillBindingContext } from '../skills/settings.ts'
 import { isPlainObject, type MiniappRecord, type MiniappSkill, type SkillToolCall } from '../../../shared/protocol.ts'
 
 // Turns a miniapp's ACTIVE skills into tools the runtime agent can call, plus the
@@ -40,16 +41,6 @@ async function llm(system: string, user: string): Promise<string> {
     max_completion_tokens: 1200,
   })
   return c.choices[0]?.message?.content?.trim() ?? ''
-}
-
-/** Read a skill's configured credentials from the agent's secrets folder. */
-function readCredentials(record: MiniappRecord, skill: MiniappSkill): Record<string, string> {
-  const name = `secrets/${skill.platformSkillId ?? skill.id}.json`
-  try {
-    return JSON.parse(readAgentFile(record.id, name) ?? '{}')
-  } catch {
-    return {}
-  }
 }
 
 function parseJsonMaybe(text: string): unknown {
@@ -104,8 +95,7 @@ function compactGithubItem(item: any) {
   }
 }
 
-async function githubApi(record: MiniappRecord, skill: MiniappSkill, path: string, init: RequestInit = {}) {
-  const creds = readCredentials(record, skill)
+async function githubApi(creds: Record<string, string>, path: string, init: RequestInit = {}) {
   const token = String(creds.token ?? '').trim()
   if (!token) return { ok: false, error: 'GitHub token is not configured.' }
   const res = await fetch(`https://api.github.com${path}`, {
@@ -131,9 +121,9 @@ function requireConfirmed(args: any) {
   return args?.userConfirmed === true ? null : toolResult({ ok: false, error: 'This GitHub write requires explicit user confirmation. Re-ask the user and call with userConfirmed=true only after they confirm the exact change.' })
 }
 
-function configuredHttpBase(record: MiniappRecord, skill: MiniappSkill) {
-  const creds = readCredentials(record, skill)
-  const base = String(creds.base_url ?? skill.config?.baseUrl ?? '').trim()
+function configuredHttpBase(resolved: ResolvedSkillSettings) {
+  const creds = resolved.credentials
+  const base = String(creds.base_url ?? resolved.config?.baseUrl ?? '').trim()
   if (!base) return { error: 'HTTP API base_url is not configured.', creds }
   try {
     const url = new URL(base)
@@ -188,15 +178,15 @@ function httpAuthHeaders(creds: Record<string, string>, target: URL): Record<str
   return { error: `Unsupported HTTP auth_type: ${authType}` }
 }
 
-async function callConfiguredHttp(record: MiniappRecord, skill: MiniappSkill, args: any) {
-  const baseInfo = configuredHttpBase(record, skill)
+async function callConfiguredHttp(resolved: ResolvedSkillSettings, args: any) {
+  const baseInfo = configuredHttpBase(resolved)
   if ('error' in baseInfo) return toolResult({ ok: false, error: baseInfo.error })
   try {
     const target = resolveHttpTarget(baseInfo.base, args, baseInfo.creds)
     const authHeaders = httpAuthHeaders(baseInfo.creds, target)
     if ('error' in authHeaders) return toolResult({ ok: false, error: authHeaders.error })
     const method = String(args?.method ?? 'GET').trim().toUpperCase()
-    const allowedMethods = Array.isArray(skill.config?.allowedMethods) ? skill.config.allowedMethods.map(String) : ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+    const allowedMethods = Array.isArray(resolved.config?.allowedMethods) ? (resolved.config.allowedMethods as unknown[]).map(String) : ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
     if (!allowedMethods.includes(method)) return toolResult({ ok: false, error: `HTTP method ${method} is not allowed for this skill.` })
     const inputHeaders = isPlainObject(args?.headers) ? args.headers : {}
     const safeHeaders: Record<string, string> = {}
@@ -216,7 +206,7 @@ async function callConfiguredHttp(record: MiniappRecord, skill: MiniappSkill, ar
       },
       ...(hasBody ? { body: typeof args.body === 'string' ? args.body : JSON.stringify(args.body) } : {}),
     })
-    const limit = Math.min(Number(skill.config?.responseLimitBytes) || 8000, 20000)
+    const limit = Math.min(Number(resolved.config?.responseLimitBytes) || 8000, 20000)
     const text = (await res.text()).slice(0, limit)
     return toolResult({
       ok: res.ok,
@@ -417,7 +407,7 @@ function patchStateTool(Type: Type, record: MiniappRecord): AgentTool {
 const seq = 'sequential' as const
 
 /** Build the pi-agent tool for one built-in handler key, per the skill's tool spec. */
-function builtinTool(Type: Type, key: string, spec: SkillToolCall, skill: MiniappSkill, record: MiniappRecord): AgentTool | null {
+function builtinTool(Type: Type, key: string, spec: SkillToolCall, skill: MiniappSkill, record: MiniappRecord, resolved: ResolvedSkillSettings): AgentTool | null {
   const base = { name: spec.name, label: spec.name, description: spec.description || skill.name, executionMode: seq }
 
   switch (key) {
@@ -452,20 +442,20 @@ function builtinTool(Type: Type, key: string, spec: SkillToolCall, skill: Miniap
           body: Type.Optional(Type.Any()),
         }),
         execute: async (_i, a) => {
-          return await callConfiguredHttp(record, skill, a)
+          return await callConfiguredHttp(resolved,a)
         } }
     case 'http_connection_status':
       return { ...base, parameters: Type.Object({ path: Type.Optional(Type.String()) }),
-        execute: async (_i, a) => await callConfiguredHttp(record, skill, { path: (a as any)?.path, method: 'GET' }) }
+        execute: async (_i, a) => await callConfiguredHttp(resolved,{ path: (a as any)?.path, method: 'GET' }) }
     case 'github_connection_status':
       return {
         ...base,
         parameters: Type.Object({}),
         execute: async () => {
           try {
-            const user = await githubApi(record, skill, '/user')
+            const user = await githubApi(resolved.credentials,'/user')
             if (!user.ok) return toolResult({ ok: false, status: user.status, error: githubError(user, 'GitHub authentication failed.') })
-            const rate = await githubApi(record, skill, '/rate_limit')
+            const rate = await githubApi(resolved.credentials,'/rate_limit')
             const body = user.body as any
             return toolResult({
               ok: true,
@@ -487,7 +477,7 @@ function builtinTool(Type: Type, key: string, spec: SkillToolCall, skill: Miniap
           const args = a as any
           const limit = Math.min(Number(args?.limit) || 30, 100)
           const type = ['all', 'owner', 'member'].includes(String(args?.type)) ? String(args.type) : 'owner'
-          const res = await githubApi(record, skill, `/user/repos${queryString({ type, sort: 'updated', per_page: limit })}`)
+          const res = await githubApi(resolved.credentials,`/user/repos${queryString({ type, sort: 'updated', per_page: limit })}`)
           if (!res.ok) return toolResult({ ok: false, status: res.status, error: githubError(res) })
           const repos = Array.isArray(res.body) ? res.body.map(compactGithubItem) : []
           return toolResult({ ok: true, total: repos.length, repos })
@@ -498,9 +488,9 @@ function builtinTool(Type: Type, key: string, spec: SkillToolCall, skill: Miniap
         ...base,
         parameters: Type.Object({ owner: Type.Optional(Type.String()), repo: Type.Optional(Type.String()) }),
         execute: async (_i, a) => {
-          const ref = repoRef(readCredentials(record, skill), a)
+          const ref = repoRef(resolved.credentials,a)
           if ('error' in ref) return toolResult({ ok: false, error: ref.error })
-          const res = await githubApi(record, skill, `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}`)
+          const res = await githubApi(resolved.credentials,`/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}`)
           if (!res.ok) return toolResult({ ok: false, status: res.status, error: githubError(res) })
           return toolResult({ ok: true, repository: compactGithubItem(res.body) })
         },
@@ -511,11 +501,11 @@ function builtinTool(Type: Type, key: string, spec: SkillToolCall, skill: Miniap
         parameters: Type.Object({ owner: Type.Optional(Type.String()), repo: Type.Optional(Type.String()), state: Type.Optional(Type.String()), labels: Type.Optional(Type.String()), since: Type.Optional(Type.String()), limit: Type.Optional(Type.Number()) }),
         execute: async (_i, a) => {
           const args = a as any
-          const ref = repoRef(readCredentials(record, skill), args)
+          const ref = repoRef(resolved.credentials,args)
           if ('error' in ref) return toolResult({ ok: false, error: ref.error })
           const limit = Math.min(Number(args?.limit) || 30, 100)
           const state = ['open', 'closed', 'all'].includes(String(args?.state)) ? String(args.state) : 'open'
-          const res = await githubApi(record, skill, `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/issues${queryString({ state, labels: args?.labels, since: args?.since, per_page: limit })}`)
+          const res = await githubApi(resolved.credentials,`/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/issues${queryString({ state, labels: args?.labels, since: args?.since, per_page: limit })}`)
           if (!res.ok) return toolResult({ ok: false, status: res.status, error: githubError(res) })
           const issues = Array.isArray(res.body) ? res.body.filter((item: any) => !item.pull_request).map(compactGithubItem) : []
           return toolResult({ ok: true, total: issues.length, issues })
@@ -527,11 +517,11 @@ function builtinTool(Type: Type, key: string, spec: SkillToolCall, skill: Miniap
         parameters: Type.Object({ owner: Type.Optional(Type.String()), repo: Type.Optional(Type.String()), issueNumber: Type.Number() }),
         execute: async (_i, a) => {
           const args = a as any
-          const ref = repoRef(readCredentials(record, skill), args)
+          const ref = repoRef(resolved.credentials,args)
           if ('error' in ref) return toolResult({ ok: false, error: ref.error })
           const issueNumber = Number(args?.issueNumber)
           if (!Number.isFinite(issueNumber)) return toolResult({ ok: false, error: 'issueNumber is required.' })
-          const res = await githubApi(record, skill, `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/issues/${issueNumber}`)
+          const res = await githubApi(resolved.credentials,`/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/issues/${issueNumber}`)
           if (!res.ok) return toolResult({ ok: false, status: res.status, error: githubError(res) })
           return toolResult({ ok: true, issue: compactGithubItem(res.body), body: (res.body as any)?.body })
         },
@@ -544,10 +534,10 @@ function builtinTool(Type: Type, key: string, spec: SkillToolCall, skill: Miniap
           const denied = requireConfirmed(a)
           if (denied) return denied
           const args = a as any
-          const ref = repoRef(readCredentials(record, skill), args)
+          const ref = repoRef(resolved.credentials,args)
           if ('error' in ref) return toolResult({ ok: false, error: ref.error })
           if (!String(args?.title ?? '').trim()) return toolResult({ ok: false, error: 'title is required.' })
-          const res = await githubApi(record, skill, `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/issues`, {
+          const res = await githubApi(resolved.credentials,`/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/issues`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ title: String(args.title), body: String(args.body ?? ''), labels: asStringArray(args.labels) }),
@@ -564,12 +554,12 @@ function builtinTool(Type: Type, key: string, spec: SkillToolCall, skill: Miniap
           const denied = requireConfirmed(a)
           if (denied) return denied
           const args = a as any
-          const ref = repoRef(readCredentials(record, skill), args)
+          const ref = repoRef(resolved.credentials,args)
           if ('error' in ref) return toolResult({ ok: false, error: ref.error })
           const issueNumber = Number(args?.issueNumber)
           const body = String(args?.body ?? '').trim()
           if (!Number.isFinite(issueNumber) || !body) return toolResult({ ok: false, error: 'issueNumber and body are required.' })
-          const res = await githubApi(record, skill, `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/issues/${issueNumber}/comments`, {
+          const res = await githubApi(resolved.credentials,`/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/issues/${issueNumber}/comments`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ body }),
@@ -586,7 +576,7 @@ function builtinTool(Type: Type, key: string, spec: SkillToolCall, skill: Miniap
           const denied = requireConfirmed(a)
           if (denied) return denied
           const args = a as any
-          const ref = repoRef(readCredentials(record, skill), args)
+          const ref = repoRef(resolved.credentials,args)
           if ('error' in ref) return toolResult({ ok: false, error: ref.error })
           const issueNumber = Number(args?.issueNumber)
           if (!Number.isFinite(issueNumber)) return toolResult({ ok: false, error: 'issueNumber is required.' })
@@ -597,7 +587,7 @@ function builtinTool(Type: Type, key: string, spec: SkillToolCall, skill: Miniap
           const labels = asStringArray(args?.labels)
           if (labels) patch.labels = labels
           if (!Object.keys(patch).length) return toolResult({ ok: false, error: 'Provide title, body, state, or labels to update.' })
-          const res = await githubApi(record, skill, `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/issues/${issueNumber}`, {
+          const res = await githubApi(resolved.credentials,`/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/issues/${issueNumber}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(patch),
@@ -792,7 +782,7 @@ function builtinTool(Type: Type, key: string, spec: SkillToolCall, skill: Miniap
         ...base,
         parameters: Type.Object({}),
         execute: async () => {
-          const r = await fetchGmailLive(record.id, 1, { limit: 1, includeSnippet: false })
+          const r = await fetchGmailLive(record.id, 1, { limit: 1, includeSnippet: false }, resolved.credentials)
           return toolResult({
             ok: r.ok,
             mode: r.mode,
@@ -817,7 +807,7 @@ function builtinTool(Type: Type, key: string, spec: SkillToolCall, skill: Miniap
         }),
         execute: async (_i, a) => {
           const limit = Math.min(Number((a as any)?.limit) || 50, 200)
-          const r = await fetchGmailLive(record.id, limit, a as GmailSearchInput)
+          const r = await fetchGmailLive(record.id, limit, a as GmailSearchInput, resolved.credentials)
           if (!r.ok) return toolResult({ ok: false, error: r.error ?? 'Gmail not connected — fill the skill credentials.' })
           return toolResult({ ok: true, total: r.emails?.length ?? 0, emails: r.emails ?? [] })
         } }
@@ -835,7 +825,7 @@ function builtinTool(Type: Type, key: string, spec: SkillToolCall, skill: Miniap
           sourceMailbox: Type.Optional(Type.String()),
         }),
         execute: async (_i, a) => {
-          const r = await modifyGmailLive(record.id, a as GmailModifyInput)
+          const r = await modifyGmailLive(record.id, a as GmailModifyInput, resolved.credentials)
           return toolResult(r.ok ? r : { ...r, ok: false, error: r.error ?? 'Gmail modification failed.' })
         } }
     default:
@@ -844,7 +834,7 @@ function builtinTool(Type: Type, key: string, spec: SkillToolCall, skill: Miniap
 }
 
 /** A custom skill's tool: run its script in the sandbox, injecting args + credentials. */
-function customTool(Type: Type, spec: SkillToolCall, skill: MiniappSkill, record: MiniappRecord): AgentTool | null {
+function customTool(Type: Type, spec: SkillToolCall, skill: MiniappSkill, record: MiniappRecord, resolved: ResolvedSkillSettings): AgentTool | null {
   const file = spec.entry ?? (skill.config?.file as string | undefined)
   const code = file ? readAgentFile(record.id, file) : (typeof skill.config?.code === 'string' ? String(skill.config.code) : null)
   if (!code) return null
@@ -855,7 +845,7 @@ function customTool(Type: Type, spec: SkillToolCall, skill: MiniappSkill, record
     parameters: Type.Object({ input: Type.Optional(Type.Record(Type.String(), Type.Any())) }),
     execute: async (_i, a) => {
       const input = (a as any)?.input ?? {}
-      const creds = readCredentials(record, skill)
+      const creds = resolved.credentials
       const wrapped = `globalThis.__INPUT__ = ${JSON.stringify(input)};\nglobalThis.__CREDENTIALS__ = ${JSON.stringify(creds)};\n${code}`
       const run = await getSandboxDriver().runCode(wrapped, { timeoutMs: 15_000 })
       return toolResult({ ok: run.ok, stdout: run.stdout.slice(0, 3000), error: run.error })
@@ -926,7 +916,12 @@ function inboxTriageTool(Type: Type, record: MiniappRecord): AgentTool {
   }
 }
 
-export function makeRuntimeTools(Type: Type, record: MiniappRecord, opts: RuntimeToolOptions = {}): AgentTool[] {
+export async function makeRuntimeTools(
+  Type: Type,
+  record: MiniappRecord,
+  ctx: SkillBindingContext = { record },
+  opts: RuntimeToolOptions = {},
+): Promise<AgentTool[]> {
   const active = (record.skills ?? []).filter((s) => s.status === 'active')
   const out: AgentTool[] = []
   const seen = new Set<string>()
@@ -938,18 +933,21 @@ export function makeRuntimeTools(Type: Type, record: MiniappRecord, opts: Runtim
   }
 
   for (const skill of active) {
+    // Settings/credentials resolve per runtime×agent (falling back to dev) so the
+    // same shared agent can be configured differently per runtime.
+    const resolved = await resolveSkillSettings(ctx, skill)
     const platformTools = skill.platformSkillId ? findPlatformSkill(skill.platformSkillId)?.tools : undefined
     for (const spec of platformTools?.length ? platformTools : skill.tools ?? []) {
-      add(spec.builtin ? builtinTool(Type, spec.builtin, spec, skill, record) : customTool(Type, spec, skill, record))
+      add(spec.builtin ? builtinTool(Type, spec.builtin, spec, skill, record, resolved) : customTool(Type, spec, skill, record, resolved))
     }
     // Legacy generated skill with no declared contract → expose its code as one tool.
     if (!(skill.tools ?? []).length && skill.source === 'generated' && (skill.config?.file || skill.config?.code)) {
-      add(customTool(Type, { name: ('run_' + skill.name.replace(/[^a-z0-9_]+/gi, '_').toLowerCase()).slice(0, 48), description: skill.name }, skill, record))
+      add(customTool(Type, { name: ('run_' + skill.name.replace(/[^a-z0-9_]+/gi, '_').toLowerCase()).slice(0, 48), description: skill.name }, skill, record, resolved))
     }
   }
 
   // App-level orchestration: inbox triage when the app can reach Gmail.
-  const hasGmail = active.some((s) => s.platformSkillId === 'gmail') || listAgentTree(record.id).tools.includes('gmail_fetch.ts')
+  const hasGmail = active.some((s) => s.platformSkillId === 'gmail') || (await listAgentTree(record.id)).tools.includes('gmail_fetch.ts')
   if (hasGmail) add(inboxTriageTool(Type, record))
 
   return [patchStateTool(Type, record), ...out].map((tool) => withLog(tool, opts))

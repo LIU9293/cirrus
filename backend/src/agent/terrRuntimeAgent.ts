@@ -263,14 +263,15 @@ export async function runTerrRuntimeAction(
   record: MiniappRecord,
   action: ActionSpec,
   payload: unknown,
+  binding?: { runtimeId?: string; agentKey?: string },
 ): Promise<TerrRuntimeActionOutcome> {
-  return runRuntimeAction(record, action, payload)
+  return runRuntimeAction(record, action, payload, binding)
 }
 
 export async function runTerrRuntimeChat(
   record: MiniappRecord,
   history: ChatTurn[],
-  opts: { sandboxId?: string | null; routing?: TerrRuntimeRoutingDecision; agentSpecs?: TerrRuntimeAgentSpec[]; route?: TerrRuntimeRoute } = {},
+  opts: { sandboxId?: string | null; routing?: TerrRuntimeRoutingDecision; agentSpecs?: TerrRuntimeAgentSpec[]; route?: TerrRuntimeRoute; binding?: { runtimeId?: string; agentKey?: string } } = {},
 ): Promise<TerrRuntimeChatOutcome> {
   const activities: DeveloperChatActivity[] = []
   if (opts.routing) activities.push({ kind: 'status', text: `TerrRuntimeAgent routing: ${opts.routing.mode}` })
@@ -279,6 +280,7 @@ export async function runTerrRuntimeChat(
   const outcome = await runRuntimeChat(record, history, {
     sandboxId: opts.sandboxId,
     terrRuntimeContext: terrRuntimeContext(opts.routing, opts.agentSpecs),
+    binding: opts.binding,
   })
   return { ...outcome, activities: [...activities, ...(outcome.activities ?? [])] }
 }

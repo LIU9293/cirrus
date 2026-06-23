@@ -1,8 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  Menu,
-  Save,
   ArrowUp,
   ArrowRight,
   Trash2,
@@ -29,13 +27,13 @@ import {
   Minimize2,
   LayoutGrid,
   Server,
-  Users,
   MousePointer2,
   X,
   Search,
   Globe,
   Bell,
   Github,
+  KeyRound,
 } from 'lucide-react'
 import type {
   BotPlatform,
@@ -74,10 +72,13 @@ import {
   addRuntimeAgent,
   removeRuntimeAgent,
   updateRuntimeAgentModelConfig,
+  getRuntimeAgentSkills,
+  saveRuntimeAgentSkillSettings,
   getMiniapp,
   type AgentEvent,
   type ChatTurn,
   type DatastoreTableInfo,
+  type RuntimeAgentSkillSettings,
 } from '@/lib/api'
 import { MiniappCanvas, type MiniappCanvasHandle } from '@/canvas/MiniappCanvas'
 import { MessageResponse } from '@/components/ai-elements/message'
@@ -97,6 +98,13 @@ export interface CanvasFlowUpdate {
 }
 
 export type NavView = 'flow' | 'agents' | 'runtime' | 'community'
+
+export interface AgentFlowNavState {
+  steps: { key: CreationPhase; label: string }[]
+  focus: number
+  reached: number
+  onStep: (index: number) => void
+}
 
 const PAGE_CONTAINER_CLASS =
   'relative z-10 mx-auto w-full max-w-[1080px] px-4 pb-16 pt-[92px] sm:px-6 sm:pb-20 sm:pt-[112px] lg:px-10 lg:pt-[116px]'
@@ -120,6 +128,7 @@ interface Props {
   miniapp: MiniappRecord
   onUpdateFlow: (partial: CanvasFlowUpdate) => void
   onNavigate: (view: NavView) => void
+  onNavStateChange?: (state: AgentFlowNavState | null) => void
   // Build/edit wiring for the Surface · Mini App panel.
   onBuild?: (text: string, agentContent?: string) => void
   buildMessages?: UiMessage[]
@@ -144,7 +153,7 @@ const PHASES: { key: CreationPhase; label: string }[] = [
   { key: 'publish', label: 'Review' },
 ]
 
-export function AgentCanvas({ miniapp, onUpdateFlow, onNavigate, onBuild, buildMessages, building, canvasRef, onState, onLiveSend, liveMessages, liveStreaming, selectingElement, selectedElement, onToggleElementSelect, onElementSelected, onClearSelection }: Props) {
+export function AgentCanvas({ miniapp, onUpdateFlow, onNavigate, onNavStateChange, onBuild, buildMessages, building, canvasRef, onState, onLiveSend, liveMessages, liveStreaming, selectingElement, selectedElement, onToggleElementSelect, onElementSelected, onClearSelection }: Props) {
   // A finished ('done') agent has cleared every step, so reopening it lands on
   // the last column (Review) with the full track visible.
   const phase = (miniapp.creationPhase === 'done' ? 'publish' : (miniapp.creationPhase ?? 'define')) as CreationPhase
@@ -192,6 +201,19 @@ export function AgentCanvas({ miniapp, onUpdateFlow, onNavigate, onBuild, buildM
 
   const focusIndex = Math.min(focus, reached)
   const focusKey = PHASES[focusIndex].key
+
+  useEffect(() => {
+    onNavStateChange?.({
+      steps: PHASES,
+      focus: focusIndex,
+      reached,
+      onStep: (index) => {
+        if (index <= reached) setFocus(index)
+      },
+    })
+    return () => onNavStateChange?.(null)
+  }, [focusIndex, reached, onNavStateChange])
+
   useLayoutEffect(() => {
     const recenter = () => {
       const container = containerRef.current
@@ -263,23 +285,6 @@ export function AgentCanvas({ miniapp, onUpdateFlow, onNavigate, onBuild, buildM
       onPointerCancel={onPanEnd}
       className={cn('dot-bg relative h-full w-full overflow-hidden', !canPan ? 'cursor-default' : grabbing ? 'cursor-grabbing select-none' : 'cursor-grab')}
     >
-      {/* Floating navbar — appears only once the first step (Define) is done */}
-      {reached > 0 && (
-        <div className="terr-fade-up pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-center pt-[40px]">
-          <Navbar focus={focusIndex} reached={reached} onStep={(i) => i <= reached && setFocus(i)} />
-        </div>
-      )}
-
-      {/* Top-left hamburger menu */}
-      <HamburgerMenu onNavigate={onNavigate} />
-
-      {/* Top-right Save Draft (hidden on the very first entry) */}
-      {reached > 0 && (
-        <button className="absolute right-[32px] top-[47px] z-40 inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-2 text-[13px] font-semibold text-ink shadow-[0_6px_20px_-8px_rgba(25,25,23,0.18)] hover:bg-surface-muted">
-          <Save className="size-3.5 text-ink-secondary" /> Save Draft
-        </button>
-      )}
-
       {/* Left-edge fade for the receding columns */}
       {reached > 0 && (
         <div
@@ -371,50 +376,6 @@ export function AgentCanvas({ miniapp, onUpdateFlow, onNavigate, onBuild, buildM
           onClearSelection={onClearSelection}
         />
       ))}
-    </div>
-  )
-}
-
-/* ───────────────────────── Navbar ───────────────────────── */
-
-function Navbar({ focus, reached, onStep }: { focus: number; reached: number; onStep: (i: number) => void }) {
-  return (
-    <div
-      data-no-pan
-      className="pointer-events-auto flex items-center gap-[11px] rounded-[18px] border border-border bg-surface px-7 py-3.5 shadow-[0_8px_26px_-6px_rgba(25,25,23,0.12)]"
-    >
-      {PHASES.map((p, i) => {
-        const engaged = i <= reached // reached or before → part of the agent
-        const focused = i === focus // where the camera is
-        return (
-          <div key={p.key} className="flex items-center gap-[11px]">
-            <button
-              onClick={() => engaged && onStep(i)}
-              className="flex items-center gap-2"
-              style={{ cursor: engaged ? 'pointer' : 'default' }}
-            >
-              <span
-                className={cn(
-                  'flex size-[22px] items-center justify-center rounded-full border text-[11px] font-mono transition',
-                  engaged ? 'border-transparent bg-primary text-primary-foreground' : 'border-border-strong bg-surface-muted text-ink-tertiary',
-                  focused && 'ring-2 ring-primary/30 ring-offset-1 ring-offset-surface',
-                )}
-              >
-                {i + 1}
-              </span>
-              <span
-                className={cn(
-                  'text-[13.5px]',
-                  focused ? 'font-semibold text-ink' : engaged ? 'font-semibold text-ink-secondary' : 'font-medium text-ink-tertiary',
-                )}
-              >
-                {p.label}
-              </span>
-            </button>
-            {i < PHASES.length - 1 && <span className="h-[1.5px] w-[34px] bg-border-strong" />}
-          </div>
-        )
-      })}
     </div>
   )
 }
@@ -806,7 +767,9 @@ function SkillSkeleton({ index }: { index: number }) {
 
 function SkillCard({ skill, onView }: { skill: MiniappSkill; onView: (rect: DOMRect) => void }) {
   const builtin = skill.kind === 'builtin' || skill.source === 'library'
-  const ready = skill.status === 'active' && !skillNeedsCredentials(skill)
+  // Credentials are bound per-runtime (not at build time), so they don't gate
+  // readiness here — a skill is ready once its contract is active.
+  const ready = skill.status === 'active'
   return (
     <div
       className="flex flex-col gap-3 rounded-[14px] border bg-surface p-3.5"
@@ -1218,8 +1181,8 @@ function ReviewColumn({ miniapp, onFinish }: { miniapp: MiniappRecord; onFinish:
   const name = miniapp.draft?.name ?? miniapp.manifest?.name ?? 'Agent'
   const hasCreated = miniapp.creationPhase === 'done'
   const skills = miniapp.skills ?? []
-  const missingCredentials = skills.filter(skillNeedsCredentials)
-  const ready = missingCredentials.length === 0
+  // Credentials are configured per-runtime, so they no longer gate creation.
+  const ready = true
   const hasMiniApp = !!miniapp.html
   return (
     <div className="flex w-[400px] flex-col gap-3">
@@ -1230,10 +1193,7 @@ function ReviewColumn({ miniapp, onFinish }: { miniapp: MiniappRecord; onFinish:
           <div className="mt-1 text-[18px] font-bold tracking-tight text-ink">{name}</div>
         </div>
         <div className="flex flex-col gap-2 text-[13px] text-ink">
-          <Row icon={<Check className="size-4 text-live" />} text={`${skills.length - missingCredentials.length}/${skills.length} capabilities ready`} />
-          {missingCredentials.map((skill) => (
-            <Row key={skill.id} icon={<AlertCircle className="size-4 text-amber-600" />} text={`${skill.name} credentials required`} />
-          ))}
+          <Row icon={<Check className="size-4 text-live" />} text={`${skills.length}/${skills.length} capabilities ready`} />
           <Row icon={<MessageSquare className="size-4 text-ink-secondary" />} text="Chat surface enabled" />
           {hasMiniApp && <Row icon={<AppWindow className="size-4 text-accent-ink" />} text="Mini App surface enabled" />}
         </div>
@@ -1662,7 +1622,7 @@ function SkillPanel({
       .filter(Boolean)
       .join('\n')
 
-  const ready = !!skill && skill.status === 'active' && !skillNeedsCredentials(skill)
+  const ready = !!skill && skill.status === 'active'
 
   return (
     <div
@@ -1884,11 +1844,14 @@ function SkillPanel({
                 {hasCredentialsSection && (
                   <>
                     <div className="pt-1 px-1 font-mono text-[10.5px] tracking-[0.12em] text-ink-tertiary">
-                      CREDENTIALS · {skillNeedsCredentials(skill) ? 'required' : 'configured'}
+                      CREDENTIALS
+                    </div>
+                    <div className="px-1 pb-1 text-[11px] leading-relaxed text-ink-tertiary">
+                      Saved as a default for your own testing. When this agent is shared or run by someone else, these are ignored — each runtime supplies its own credentials.
                     </div>
                     <Collapsible
                       title="Auth"
-                      meta={skillNeedsCredentials(skill) ? 'required' : 'configured'}
+                      meta={skillNeedsCredentials(skill) ? 'default' : 'set'}
                       open={section === 'credentials'}
                       onToggle={() => setSection((s) => (s === 'credentials' ? '' : 'credentials'))}
                     >
@@ -2089,54 +2052,6 @@ function ToolCallCard({
   )
 }
 
-/* ───────── Top-left navigation menu ───────── */
-
-const NAV_ITEMS: { key: NavView; label: string; icon: React.ReactNode }[] = [
-  { key: 'agents', label: 'My Agents', icon: <LayoutGrid className="size-[17px]" /> },
-  { key: 'community', label: 'Community Agents', icon: <Users className="size-[17px]" /> },
-  { key: 'runtime', label: 'Runtimes', icon: <Server className="size-[17px]" /> },
-]
-
-export function HamburgerMenu({ onNavigate }: { onNavigate: (v: NavView) => void }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: PointerEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('pointerdown', onDown)
-    return () => document.removeEventListener('pointerdown', onDown)
-  }, [open])
-  return (
-    <div ref={ref} data-no-pan className="absolute left-4 top-5 z-40 sm:left-[32px] sm:top-[42px]">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex size-11 items-center justify-center rounded-full border border-border bg-surface text-ink shadow-[0_6px_20px_-8px_rgba(25,25,23,0.18)] hover:bg-surface-muted sm:size-[46px]"
-        aria-label="Menu"
-      >
-        <Menu className="size-5" />
-      </button>
-      {open && (
-        <div className="terr-pop absolute left-0 top-[54px] w-[208px] rounded-[14px] border border-border bg-surface p-1.5 shadow-[0_12px_32px_-8px_rgba(25,25,23,0.18)]">
-          {NAV_ITEMS.map((it) => (
-            <button
-              key={it.key}
-              onClick={() => {
-                setOpen(false)
-                onNavigate(it.key)
-              }}
-              className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[14px] font-medium text-ink hover:bg-surface-muted"
-            >
-              <span className="text-ink-secondary">{it.icon}</span> {it.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 /* ───────── My Agents ───────── */
 
 export function MyAgentsPage({
@@ -2154,7 +2069,6 @@ export function MyAgentsPage({
 }) {
   return (
     <div className="dot-bg relative h-full w-full overflow-auto">
-      <HamburgerMenu onNavigate={onNavigate} />
       <div className={PAGE_CONTAINER_CLASS}>
         <div className={PAGE_HEADER_CLASS}>
           <h1 className="text-[28px] font-bold tracking-tight text-ink">My Agents</h1>
@@ -2185,8 +2099,7 @@ export function MyAgentsPage({
 function AgentCard({ agent, onClick, onRemove }: { agent: MiniappRecord; onClick: () => void; onRemove: () => void }) {
   const name = agent.draft?.name ?? agent.manifest?.name ?? 'Untitled agent'
   const goal = agent.draft?.goal ?? agent.manifest?.description ?? 'No description yet.'
-  const missingCredentials = (agent.skills ?? []).some(skillNeedsCredentials)
-  const ready = (agent.creationPhase ?? 'define') === 'done' && !missingCredentials
+  const ready = (agent.creationPhase ?? 'define') === 'done'
   const skills = (agent.skills ?? []).length
   const [menuOpen, setMenuOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
@@ -2246,7 +2159,7 @@ function AgentCard({ agent, onClick, onRemove }: { agent: MiniappRecord; onClick
             onClick={(e) => { e.stopPropagation(); setAddOpen(true); setMenuOpen(false) }}
             className="flex size-7 items-center justify-center rounded-[8px] border border-border bg-surface text-ink-secondary shadow-sm hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-35"
             aria-label="Add to runtime"
-            title={ready ? 'Add to runtime' : 'Configure required credentials before adding to runtime'}
+            title={ready ? 'Add to runtime' : 'Finish creating this agent before adding to runtime'}
           >
             <Plus className="size-[15px]" />
           </button>
@@ -2449,7 +2362,6 @@ function communityAgentRef(agent: CommunityAgent): RuntimeAgentRef {
 export function CommunityPage({ onNavigate }: { onNavigate: (v: NavView) => void }) {
   return (
     <div className="dot-bg relative h-full w-full overflow-auto">
-      <HamburgerMenu onNavigate={onNavigate} />
       <div className={PAGE_CONTAINER_CLASS}>
         <div>
           <h1 className="text-[28px] font-bold tracking-tight text-ink">Community Agents</h1>
@@ -2505,7 +2417,6 @@ function CommunityAgentCard({ agent }: { agent: CommunityAgent }) {
 export function ComingSoon({ title, onNavigate }: { title: string; onNavigate: (v: NavView) => void }) {
   return (
     <div className="dot-bg relative grid h-full w-full place-items-center">
-      <HamburgerMenu onNavigate={onNavigate} />
       <div className="relative z-10 text-center">
         <div className="text-[22px] font-bold tracking-tight text-ink">{title}</div>
         <div className="mt-1.5 text-[14px] text-ink-secondary">Coming soon.</div>
@@ -2591,7 +2502,6 @@ export function RuntimesPage({
 
   return (
     <div className="dot-bg relative h-full w-full overflow-auto">
-      <HamburgerMenu onNavigate={onNavigate} />
       <div className={PAGE_CONTAINER_CLASS}>
         <div className={PAGE_HEADER_CLASS}>
           <div>
@@ -3136,7 +3046,7 @@ function RuntimeWindow({
   const [runtime, setRuntime] = useState<RuntimeRecord | null>(null)
   const [miniapp, setMiniapp] = useState<MiniappRecord | null>(null)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
-  const [tab, setTab] = useState<'chat' | 'bots' | 'details'>('chat')
+  const [tab, setTab] = useState<'chat' | 'bots' | 'details' | 'config'>('chat')
   const [showMiniapp, setShowMiniapp] = useState(false)
   const [messages, setMessages] = useState<UiMessage[]>([])
   const [sending, setSending] = useState(false)
@@ -3253,10 +3163,11 @@ function RuntimeWindow({
     if (rt) setRuntime(rt)
   }
 
-  const tabs: { key: 'chat' | 'bots' | 'details'; label: string; icon: React.ReactNode; show: boolean }[] = [
+  const tabs: { key: 'chat' | 'bots' | 'details' | 'config'; label: string; icon: React.ReactNode; show: boolean }[] = [
     { key: 'chat', label: 'Chat', icon: <MessageSquare className="size-[15px]" />, show: true },
     { key: 'bots', label: 'Bots', icon: <Bot className="size-[15px]" />, show: true },
     { key: 'details', label: 'Details', icon: <LayoutGrid className="size-[15px]" />, show: true },
+    { key: 'config', label: 'Configuration', icon: <KeyRound className="size-[15px]" />, show: true },
   ]
   const activeTab = tab
 
@@ -3505,6 +3416,7 @@ function RuntimeWindow({
           )}
           {activeTab === 'bots' && <BotsPanel bots={runtime?.bots ?? []} onConnect={connect} onDisconnect={disconnect} />}
           {activeTab === 'details' && <DetailsPanel runtime={runtime} agents={agents} onAddAgent={addAgent} onRemoveAgent={removeAgent} onUpdateAgentModel={updateAgentModel} />}
+          {activeTab === 'config' && <ConfigurationPanel runtimeId={id} runtime={runtime} />}
         </div>
 
         {/* Corner resize handle */}
@@ -3678,6 +3590,200 @@ function AgentRow({
           <ModelConfigDialog agent={agent} onClose={() => setModelOpen(false)} onSave={async (cfg) => { await onUpdateModel(cfg); setModelOpen(false) }} />,
           document.body,
         )}
+    </div>
+  )
+}
+
+// The runtime's Configuration tab. Consolidates every own-agent's skill settings
+// and credentials in one place. Values are bound per runtime×agent, so the same
+// shared agent can carry different settings in each runtime. Fields are edited
+// inline (prefilled when set) and saved on change/blur — no separate save card.
+function ConfigurationPanel({ runtimeId, runtime }: { runtimeId: string; runtime: RuntimeRecord | null }) {
+  const ownAgents = (runtime?.agents ?? []).filter((a) => a.source === 'own')
+  return (
+    <div className="flex h-full flex-col gap-7 overflow-auto p-6">
+      <div>
+        <div className="text-[13px] font-semibold text-ink">Configuration</div>
+        <div className="mt-1 text-[12px] text-ink-tertiary">Credentials &amp; settings for each agent — applied to this runtime only.</div>
+      </div>
+      {ownAgents.length === 0 ? (
+        <div className="text-[12.5px] text-ink-tertiary">No configurable agents in this runtime yet.</div>
+      ) : (
+        ownAgents.map((a) => <AgentConfigSection key={a.key} runtimeId={runtimeId} agent={a} />)
+      )}
+    </div>
+  )
+}
+
+function AgentConfigSection({ runtimeId, agent }: { runtimeId: string; agent: RuntimeAgentRef }) {
+  const [skills, setSkills] = useState<RuntimeAgentSkillSettings[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const reload = () => {
+    getRuntimeAgentSkills(runtimeId, agent.key)
+      .then(setSkills)
+      .catch((err) => setError(String((err as Error)?.message ?? err)))
+  }
+  useEffect(reload, [runtimeId, agent.key])
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <span className="flex size-[22px] items-center justify-center rounded-[7px] bg-accent-soft text-accent-ink">
+          <Sparkles className="size-[12px]" />
+        </span>
+        <span className="text-[12.5px] font-semibold text-ink">{agent.name}</span>
+      </div>
+      {error && <div className="text-[12px] text-destructive">{error}</div>}
+      {!skills && !error && (
+        <div className="flex items-center gap-2 text-[12px] text-ink-tertiary"><Loader2 className="size-3.5 animate-spin" /> Loading…</div>
+      )}
+      {skills && skills.length === 0 && (
+        <div className="rounded-[10px] border border-dashed border-border px-3 py-2.5 text-[12px] text-ink-tertiary">No skills need configuration.</div>
+      )}
+      <div className="flex flex-col gap-3">
+        {(skills ?? []).map((skill) => (
+          <SkillConfigFields key={skill.id} runtimeId={runtimeId} agentKey={agent.key} skill={skill} onSaved={reload} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SkillConfigFields({
+  runtimeId,
+  agentKey,
+  skill,
+  onSaved,
+}: {
+  runtimeId: string
+  agentKey: string
+  skill: RuntimeAgentSkillSettings
+  onSaved: () => void
+}) {
+  // Local edits per key; cleared after a successful save so the reloaded value shows.
+  const [values, setValues] = useState<Record<string, string>>({})
+  const [savingKey, setSavingKey] = useState<string | null>(null)
+  const [savedKey, setSavedKey] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [open, setOpen] = useState(false) // collapsed by default
+  const filledCount = skill.settings.filter((f) => f.filled).length
+
+  const commit = async (key: string, raw: string) => {
+    setSavingKey(key)
+    setError(null)
+    try {
+      await saveRuntimeAgentSkillSettings(runtimeId, agentKey, skill.id, { [key]: raw })
+      setValues((v) => { const n = { ...v }; delete n[key]; return n })
+      setSavedKey(key)
+      setTimeout(() => setSavedKey((k) => (k === key ? null : k)), 1600)
+      onSaved()
+    } catch (err) {
+      setError(String((err as Error)?.message ?? err))
+    } finally {
+      setSavingKey((k) => (k === key ? null : k))
+    }
+  }
+
+  const fieldStatus = (key: string) => (savingKey === key ? 'saving' : savedKey === key ? 'saved' : null)
+
+  const labelRow = (field: RuntimeAgentSkillSettings['settings'][number]) => {
+    const status = fieldStatus(field.key)
+    return (
+      <span className="flex items-center gap-1.5 text-[11.5px] font-semibold text-ink-secondary">
+        {field.label}
+        {field.required === false && <span className="font-normal text-ink-tertiary">optional</span>}
+        {status === 'saving' && <Loader2 className="size-3 animate-spin text-ink-tertiary" />}
+        {status === 'saved' && <Check className="size-3 text-live" />}
+        {field.secret && field.filled && !status && <span className="font-normal text-ink-tertiary">saved</span>}
+      </span>
+    )
+  }
+
+  return (
+    <div className="rounded-[12px] border border-border bg-surface">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-3.5 py-3 text-left"
+        aria-expanded={open}
+      >
+        <ChevronRight className={cn('size-[14px] shrink-0 text-ink-tertiary transition-transform', open && 'rotate-90')} />
+        <span className="text-[12px] font-semibold text-ink">{skill.name}</span>
+        <span className="ml-auto text-[11px] text-ink-tertiary">
+          {filledCount > 0 ? `${filledCount}/${skill.settings.length} set` : `${skill.settings.length} settings`}
+        </span>
+      </button>
+      {open && (
+      <div className="flex flex-col gap-3 px-3.5 pb-3.5">
+        {skill.settings.map((field) => {
+          const isSecret = field.secret || field.type === 'password'
+
+          if (field.type === 'boolean') {
+            const on = (values[field.key] ?? field.value) === 'true'
+            return (
+              <div key={field.key} className="flex items-center justify-between gap-3">
+                {labelRow(field)}
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={on}
+                  onClick={() => commit(field.key, on ? 'false' : 'true')}
+                  className={cn('relative h-5 w-9 shrink-0 rounded-full transition', on ? 'bg-primary' : 'bg-border-strong')}
+                >
+                  <span className={cn('absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition', on ? 'left-4' : 'left-0.5')} />
+                </button>
+              </div>
+            )
+          }
+
+          if (field.type === 'select') {
+            return (
+              <label key={field.key} className="flex flex-col gap-1">
+                {labelRow(field)}
+                <select
+                  value={values[field.key] ?? field.value ?? ''}
+                  onChange={(e) => { setValues((v) => ({ ...v, [field.key]: e.target.value })); void commit(field.key, e.target.value) }}
+                  className="h-9 rounded-[9px] border border-border-strong bg-white/80 px-3 text-[13px] text-ink outline-none focus:border-primary"
+                >
+                  <option value="">{field.placeholder ?? 'Select…'}</option>
+                  {(field.options ?? []).map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+            )
+          }
+
+          const value = values[field.key] ?? (isSecret ? '' : field.value ?? '')
+          const placeholder = field.placeholder ?? (field.filled && isSecret ? 'Saved — type to replace' : '')
+          const onBlur = (raw: string) => { if (values[field.key] !== undefined && raw.trim()) void commit(field.key, raw) }
+
+          return (
+            <label key={field.key} className="flex flex-col gap-1">
+              {labelRow(field)}
+              {field.type === 'textarea' ? (
+                <textarea
+                  value={value}
+                  onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
+                  onBlur={(e) => onBlur(e.target.value)}
+                  placeholder={placeholder}
+                  className="min-h-[76px] resize-y rounded-[9px] border border-border-strong bg-white/80 px-3 py-2 text-[13px] text-ink outline-none focus:border-primary"
+                />
+              ) : (
+                <input
+                  value={value}
+                  onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
+                  onBlur={(e) => onBlur(e.target.value)}
+                  type={isSecret ? 'password' : 'text'}
+                  placeholder={placeholder}
+                  className="h-9 rounded-[9px] border border-border-strong bg-white/80 px-3 text-[13px] text-ink outline-none focus:border-primary"
+                />
+              )}
+            </label>
+          )
+        })}
+        {error && <span className="text-[11.5px] text-red-600">{error}</span>}
+      </div>
+      )}
     </div>
   )
 }

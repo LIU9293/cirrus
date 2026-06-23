@@ -6,10 +6,10 @@ import { runTerrRuntimeAction } from '../agent/terrRuntimeAgent.ts'
 
 async function main() {
   const appId = process.argv[2] || 'app-l99jrh-2cfn'
-  const record = loadRecord(appId)
+  const record = await loadRecord(appId)
   if (!record) throw new Error(`Miniapp not found: ${appId}`)
 
-  const tools = makeRuntimeTools(Type, record)
+  const tools = await makeRuntimeTools(Type, record)
   const byName = Object.fromEntries(tools.map((tool) => [tool.name, tool]))
   const call = async (name: string, args: Record<string, unknown> = {}) => {
     const tool = byName[name]

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Plus, ChevronDown, Code2, Play, Trash2, ListChecks } from 'lucide-react'
-import type { CanvasElementSelection, MiniappRecord } from '@shared/protocol'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { LogOut, Settings, UserCircle } from 'lucide-react'
+import type { AuthUser, CanvasElementSelection, MiniappRecord } from '@shared/protocol'
 import {
   createMiniapp,
   deleteMiniapp,
@@ -13,18 +14,24 @@ import {
   sendLiveChat,
   submitCanvasScreenshotResponse,
   streamChat,
+  getAuth,
+  devLogin,
+  logout,
+  googleLoginUrl,
+  type AuthInfo,
   type AgentEvent,
   type ChatTurn,
 } from '@/lib/api'
 import { ChatPanel, type UiMessage } from '@/chat/ChatPanel'
 import { MiniappCanvas, type MiniappCanvasHandle } from '@/canvas/MiniappCanvas'
 import { CreationWizard, type WizardFlowUpdate } from '@/wizard/CreationWizard'
-import type { NavView } from '@/wizard/AgentCanvas'
+import type { AgentFlowNavState, NavView } from '@/wizard/AgentCanvas'
 import { ROUTES, viewFromPath } from '@/routes'
 import { AgentFlowPage } from '@/pages/AgentFlowPage'
 import { AgentPage } from '@/pages/AgentPage'
 import { CommunityAgentsPage } from '@/pages/CommunityAgentsPage'
 import { RuntimePage } from '@/pages/RuntimePage'
+import { CardNav, type CardNavItem } from '@/components/CardNav'
 
 export type StudioMode = 'dev' | 'live'
 
@@ -37,6 +44,7 @@ let seq = 0
 const nextId = () => `m${Date.now()}-${seq++}`
 
 export function App() {
+  const [auth, setAuth] = useState<AuthInfo | null>(null) // null = still loading
   const [miniapp, setMiniapp] = useState<MiniappRecord | null>(null)
   const [list, setList] = useState<(MiniappRecord & { hasHtml: boolean })[]>([])
   const [messages, setMessages] = useState<UiMessage[]>([])
@@ -45,6 +53,7 @@ export function App() {
   const [liveStreaming, setLiveStreaming] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [view, setView] = useState<NavView>(() => viewFromPath(window.location.pathname))
+  const [agentFlowNav, setAgentFlowNav] = useState<AgentFlowNavState | null>(null)
   const [mode, setMode] = useState<StudioMode>('dev')
   const [chatWidth, setChatWidth] = useState<number | null>(null)
   const [resizing, setResizing] = useState(false)
@@ -80,6 +89,10 @@ export function App() {
     }
   }, [])
 
+  useEffect(() => {
+    if (view !== 'flow') setAgentFlowNav(null)
+  }, [view])
+
   const setActiveMiniapp = useCallback((record: MiniappRecord) => {
     messagesHydratedForRef.current = record.id
     setMiniapp(record)
@@ -97,7 +110,14 @@ export function App() {
     }
   }, [])
 
+  // Resolve the current session on load.
   useEffect(() => {
+    void getAuth().then(setAuth).catch(() => setAuth({ user: null, devAuth: false, googleAuth: false }))
+  }, [])
+
+  // Bootstrap the studio only once signed in (scoped to the user's own agents).
+  useEffect(() => {
+    if (!auth?.user) return
     void (async () => {
       await refreshList()
       const existing = await listMiniapps().catch(() => [])
@@ -107,7 +127,7 @@ export function App() {
         setActiveMiniapp(await createMiniapp())
       }
     })()
-  }, [refreshList, setActiveMiniapp])
+  }, [auth?.user, refreshList, setActiveMiniapp])
 
   useEffect(() => {
     if (!miniapp || messagesHydratedForRef.current !== miniapp.id) return
@@ -404,32 +424,52 @@ export function App() {
     [miniapp, liveStreaming],
   )
 
-  // Top-level navigation (URL routes: /agent, /community, /runtime, /new; / redirects to /agent).
-  if (view === 'agents') {
-    return <AgentPage agents={list} onOpen={openAgent} onNew={newAgent} onRemove={handleDelete} onNavigate={navigate} />
+  // ── Auth gate ──
+  if (!auth) {
+    return <div className="dot-bg grid h-full w-full place-items-center text-sm text-muted-foreground">Loading…</div>
   }
-  if (view === 'runtime') return <RuntimePage agents={list} onNavigate={navigate} />
-  if (view === 'community') return <CommunityAgentsPage onNavigate={navigate} />
+  if (!auth.user) {
+    return <LoginScreen info={auth} onSignedIn={(user) => setAuth({ ...auth, user })} />
+  }
+
+  // Top-level navigation (URL routes: /agent, /community, /runtime, /new; / redirects to /agent).
+  const appNavbar = (
+    <AppNavbar
+      user={auth.user}
+      view={view}
+      onNavigate={navigate}
+      centerSlot={view === 'flow' && agentFlowNav ? <AgentFlowNavbarStepper state={agentFlowNav} /> : null}
+    />
+  )
+  if (view === 'agents') {
+    return <>{appNavbar}<AgentPage agents={list} onOpen={openAgent} onNew={newAgent} onRemove={handleDelete} onNavigate={navigate} /></>
+  }
+  if (view === 'runtime') return <>{appNavbar}<RuntimePage agents={list} onNavigate={navigate} /></>
+  if (view === 'community') return <>{appNavbar}<CommunityAgentsPage onNavigate={navigate} /></>
   if (miniapp) {
     return (
-      <AgentFlowPage
-        miniapp={miniapp}
-        onUpdateFlow={updateFlow}
-        onNavigate={navigate}
-        onBuild={handleSend}
-        buildMessages={messages}
-        building={streaming}
-        canvasRef={canvasRef}
-        onState={handleState}
-        onLiveSend={handleLiveSend}
-        liveMessages={liveMessages}
-        liveStreaming={liveStreaming}
-        selectingElement={selectingElement}
-        selectedElement={selectionAttachment?.selection ?? null}
-        onToggleElementSelect={handleToggleElementSelect}
-        onElementSelected={handleElementSelected}
-        onClearSelection={() => setSelectionAttachment(null)}
-      />
+      <>
+        {appNavbar}
+        <AgentFlowPage
+          miniapp={miniapp}
+          onUpdateFlow={updateFlow}
+          onNavigate={navigate}
+          onBuild={handleSend}
+          buildMessages={messages}
+          building={streaming}
+          canvasRef={canvasRef}
+          onState={handleState}
+          onLiveSend={handleLiveSend}
+          liveMessages={liveMessages}
+          liveStreaming={liveStreaming}
+          selectingElement={selectingElement}
+          selectedElement={selectionAttachment?.selection ?? null}
+          onToggleElementSelect={handleToggleElementSelect}
+          onElementSelected={handleElementSelected}
+          onClearSelection={() => setSelectionAttachment(null)}
+          onNavStateChange={setAgentFlowNav}
+        />
+      </>
     )
   }
   // Legacy full-screen studio kept for reference (app canvas edit/preview now lives
@@ -438,6 +478,216 @@ export function App() {
 
   return <div className="dot-bg grid h-full w-full place-items-center text-sm text-muted-foreground">Loading…</div>
 
+}
+
+/** Sign-in screen. Uses Google OAuth when configured, else the dev email fallback. */
+function LoginScreen({ info, onSignedIn }: { info: AuthInfo; onSignedIn: (user: AuthUser) => void }) {
+  const [email, setEmail] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const signInDev = async () => {
+    if (!email.includes('@') || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      onSignedIn(await devLogin(email.trim()))
+    } catch (err) {
+      setError(String((err as Error)?.message ?? err))
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="dot-bg grid h-full w-full place-items-center p-6">
+      <div className="relative z-[1] w-full max-w-[360px] rounded-[18px] border border-border bg-surface p-7 shadow-[0_24px_60px_-20px_rgba(25,25,23,0.25)]">
+        <div className="text-[20px] font-bold tracking-tight text-ink">Terr Studio</div>
+        <div className="mt-1 text-[13px] text-ink-secondary">Sign in to access your agents and runtimes.</div>
+        {info.googleAuth && (
+          <a
+            href={googleLoginUrl}
+            className="mt-5 flex h-10 w-full items-center justify-center gap-2 rounded-[10px] border border-border-strong bg-white text-[13.5px] font-semibold text-ink hover:bg-surface-muted"
+          >
+            Continue with Google
+          </a>
+        )}
+        {info.devAuth && (
+          <div className="mt-5">
+            {info.googleAuth && <div className="mb-3 text-center text-[11px] uppercase tracking-wide text-ink-tertiary">or dev sign-in</div>}
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void signInDev() }}
+              type="email"
+              placeholder="you@example.com"
+              className="h-10 w-full rounded-[10px] border border-border-strong bg-white/80 px-3 text-[13.5px] text-ink outline-none focus:border-primary"
+            />
+            <button
+              onClick={() => void signInDev()}
+              disabled={busy || !email.includes('@')}
+              className="mt-2.5 h-10 w-full rounded-[10px] bg-primary text-[13.5px] font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-40"
+            >
+              {busy ? 'Signing in…' : 'Sign in'}
+            </button>
+            <div className="mt-2 text-[11px] text-ink-tertiary">
+              Dev mode — local email-only sign-in for development.
+            </div>
+          </div>
+        )}
+        {error && <div className="mt-3 text-[12px] text-red-600">{error}</div>}
+      </div>
+    </div>
+  )
+}
+
+function AppNavbar({
+  user,
+  view,
+  onNavigate,
+  centerSlot,
+}: {
+  user: AuthUser
+  view: NavView
+  onNavigate: (view: NavView) => void
+  centerSlot?: ReactNode
+}) {
+  const items = useMemo<CardNavItem[]>(
+    () => [
+      {
+        label: 'Agent',
+        bgColor: '#f3f0ff',
+        textColor: '#29215d',
+        links: [
+          { label: 'My Agents', ariaLabel: 'Open My Agents', active: view === 'agents', onClick: () => onNavigate('agents') },
+          { label: 'Community', ariaLabel: 'Open Community Agents', active: view === 'community', onClick: () => onNavigate('community') },
+        ],
+      },
+      {
+        label: 'Runtime',
+        bgColor: '#edfdf7',
+        textColor: '#123b2f',
+        links: [
+          { label: 'My Runtimes', ariaLabel: 'Open My Runtimes', active: view === 'runtime', onClick: () => onNavigate('runtime') },
+        ],
+      },
+      {
+        label: 'Setting',
+        bgColor: '#f6f6f2',
+        textColor: '#2f302b',
+        links: [
+          { label: 'Profile', ariaLabel: 'Open Profile' },
+          { label: 'Settings', ariaLabel: 'Open Settings' },
+        ],
+      },
+    ],
+    [onNavigate, view],
+  )
+
+  return (
+    <CardNav
+      centerSlot={centerSlot}
+      items={items}
+      rightSlot={<NavbarUserMenu user={user} />}
+      baseColor="rgba(255,255,255,0.92)"
+      menuColor="#25251f"
+    />
+  )
+}
+
+function AgentFlowNavbarStepper({ state }: { state: AgentFlowNavState }) {
+  return (
+    <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+      {state.steps.map((step, i) => {
+        const engaged = i <= state.reached
+        const focused = i === state.focus
+        return (
+          <div key={step.key} className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+            <button
+              type="button"
+              onClick={() => engaged && state.onStep(i)}
+              className="flex min-w-0 items-center gap-1.5"
+              style={{ cursor: engaged ? 'pointer' : 'default' }}
+              aria-current={focused ? 'step' : undefined}
+            >
+              <span
+                className={`flex size-[19px] items-center justify-center rounded-full border text-[10px] font-mono transition ${
+                  engaged ? 'border-transparent bg-primary text-primary-foreground' : 'border-border-strong bg-surface-muted text-ink-tertiary'
+                } ${focused ? 'ring-2 ring-primary/25 ring-offset-1 ring-offset-surface' : ''}`}
+              >
+                {i + 1}
+              </span>
+              <span className={`hidden text-[12px] sm:inline ${focused ? 'font-semibold text-ink' : engaged ? 'font-semibold text-ink-secondary' : 'font-medium text-ink-tertiary'}`}>
+                {step.label}
+              </span>
+            </button>
+            {i < state.steps.length - 1 && <span className="h-px w-4 shrink-0 bg-border-strong sm:w-7" />}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function NavbarUserMenu({ user }: { user: AuthUser }) {
+  const [open, setOpen] = useState(false)
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
+  const label = user.name || user.email
+  const menuRect = open ? buttonRef.current?.getBoundingClientRect() : null
+  const menuStyle = menuRect
+    ? {
+        top: menuRect.bottom + 8,
+        right: Math.max(12, window.innerWidth - menuRect.right),
+      }
+    : { top: 72, right: 12 }
+
+  return (
+    <div className="relative h-full min-w-0">
+      <button
+        ref={buttonRef}
+        onClick={() => setOpen((v) => !v)}
+        className="grid h-full w-11 place-items-center rounded-[12px] bg-transparent hover:bg-surface-muted"
+        aria-label="Open user menu"
+        aria-expanded={open}
+      >
+        {user.picture
+          ? <img src={user.picture} alt="" className="size-7 rounded-full" />
+          : <span className="grid size-7 place-items-center rounded-full bg-accent-soft text-[11px] font-bold text-accent-ink">{label.slice(0, 1).toUpperCase()}</span>}
+      </button>
+      {open && createPortal(
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-[270] cursor-default"
+            onClick={() => setOpen(false)}
+            aria-label="Close user menu"
+          />
+          <div
+            className="fixed z-[280] w-52 overflow-hidden rounded-[12px] border border-border bg-surface p-1 shadow-[0_18px_46px_-18px_rgba(25,25,23,0.35)]"
+            style={menuStyle}
+          >
+            <div className="flex items-center gap-2 px-2.5 py-2">
+              <UserCircle className="size-[15px] text-ink-tertiary" />
+              <div className="min-w-0">
+                <div className="truncate text-[12px] font-semibold text-ink">{label}</div>
+                <div className="truncate text-[11px] text-ink-tertiary">{user.email}</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-[7px] px-2.5 py-2 text-left text-[13px] font-medium text-ink-secondary hover:bg-surface-muted"
+            >
+              <Settings className="size-[14px]" /> Settings
+            </button>
+            <button
+              onClick={async () => { await logout(); window.location.reload() }}
+              className="flex w-full items-center gap-2 rounded-[7px] px-2.5 py-2 text-left text-[13px] font-medium text-destructive hover:bg-destructive/10"
+            >
+              <LogOut className="size-[14px]" /> Sign out
+            </button>
+          </div>
+        </>,
+        document.body,
+      )}
+    </div>
+  )
 }
 
 function applyEvent(messages: UiMessage[], asstId: string, ev: AgentEvent): UiMessage[] {

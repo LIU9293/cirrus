@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: terr-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: terr
+      POSTGRES_PASSWORD: terr
+      POSTGRES_DB: terr
+    ports:
+      # Host 5433 → container 5432 (avoids a local Homebrew Postgres on 5432).
+      - '5433:5432'
+    volumes:
+      # PG18 Docker stores data in a major-version subdir; mount the parent.
+      - terr-pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U terr -d terr']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  terr-pgdata:

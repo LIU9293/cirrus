@@ -127,7 +127,7 @@ export async function fetchGmailInRuntimeSandbox(
   maxN = 200,
   input?: GmailSearchInput | string,
 ): Promise<GmailFetchResult> {
-  const creds = readGmailCredentials(recordId)
+  const creds = await readGmailCredentials(recordId)
   if (!creds.ok) return { ok: false, mode: 'none', error: creds.error }
   const search = normalizeSearch(input, maxN)
   const code = buildSandboxFetchCode({

@@ -1,49 +1,44 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs'
-import { resolve, join, dirname } from 'node:path'
-import { config } from './config.ts'
+import { query } from './db.ts'
 import type { MiniappRecord } from '../../shared/protocol.ts'
 
-// Filesystem-first agent model (Eve-style). Each miniapp is an agent FOLDER.
-// The fixed taxonomy (a miniapp IS an agent made of):
+// Filesystem-first agent model, now backed by Postgres. The agent folder for a
+// miniapp lives in `miniapp_files` under the `agent/` path prefix:
 //
-//   data/miniapps/<id>/agent/
-//     soul.md             SOUL — what the agent does (seeded from Define, user-editable)
-//     agent.json          model + wiring
-//     skills/<name>.md     SKILLS — capabilities (data/tool/ai/connector), per terr_skill_contract.md
-//     tools/<name>.ts      skill implementations (generated ones run in the sandbox)
-//     data/                datasource configs (the managed datastore is the backend)
-//     schedules/           TRIGGERS — cron / events
-//     channels/            SURFACES — optional: miniapp (visual) / bot / api
+//   agent/soul.md             SOUL — what the agent does
+//   agent/skills/<name>.md    SKILLS (per terr_skill_contract.md)
+//   agent/tools/<name>.ts     skill implementations
+//   agent/data/ schedules/ channels/ secrets/   data, triggers, surfaces, credentials
 //
-// File location = identity; no separate registry. This module reads/writes that tree.
+// Path = identity; reads/writes go through the miniapp_files table.
 
 const SUBDIRS = ['tools', 'skills', 'data', 'schedules', 'channels'] as const
 const SOUL_FILE = 'soul.md'
 const LEGACY_SOUL_FILE = 'instructions.md'
 const SAFE = /^[A-Za-z0-9._/-]+$/
 
-function agentDir(id: string) {
-  return join(resolve(config.dataDir, 'miniapps', id), 'agent')
-}
-function agentPath(id: string, rel: string) {
+function agentKey(rel: string): string {
   if (!SAFE.test(rel) || rel.includes('..')) throw new Error(`Unsafe agent path: ${rel}`)
-  return join(agentDir(id), rel)
+  return `agent/${rel}`
 }
 
-export function readAgentFile(id: string, rel: string): string | null {
-  const p = agentPath(id, rel)
-  return existsSync(p) ? readFileSync(p, 'utf-8') : null
+export async function readAgentFile(id: string, rel: string): Promise<string | null> {
+  const { rows } = await query<{ content: string }>(
+    'select content from miniapp_files where miniapp_id = $1 and path = $2',
+    [id, agentKey(rel)],
+  )
+  return rows[0] ? rows[0].content : null
 }
 
-export function writeAgentFile(id: string, rel: string, content: string): void {
-  const p = agentPath(id, rel)
-  mkdirSync(dirname(p), { recursive: true })
-  writeFileSync(p, content)
+export async function writeAgentFile(id: string, rel: string, content: string): Promise<void> {
+  await query(
+    `insert into miniapp_files (miniapp_id, path, content, updated_at) values ($1, $2, $3, now())
+     on conflict (miniapp_id, path) do update set content = excluded.content, updated_at = now()`,
+    [id, agentKey(rel), content],
+  )
 }
 
-export function deleteAgentFile(id: string, rel: string): void {
-  const p = agentPath(id, rel)
-  if (existsSync(p)) rmSync(p, { force: true })
+export async function deleteAgentFile(id: string, rel: string): Promise<void> {
+  await query('delete from miniapp_files where miniapp_id = $1 and path = $2', [id, agentKey(rel)])
 }
 
 export interface AgentTree {
@@ -55,39 +50,51 @@ export interface AgentTree {
   channels: string[]
 }
 
-export function listAgentTree(id: string): AgentTree {
-  const dir = agentDir(id)
-  const ls = (sub: string) => {
-    const d = join(dir, sub)
-    return existsSync(d) ? readdirSync(d).filter((f) => !f.startsWith('.')) : []
+/** Immediate entries (file or dir names) under each agent subdir, mirroring the
+ *  old readdir-based behavior over the flat path keys. */
+export async function listAgentTree(id: string): Promise<AgentTree> {
+  const { rows } = await query<{ path: string }>(
+    `select path from miniapp_files where miniapp_id = $1 and path like 'agent/%'`,
+    [id],
+  )
+  const paths = rows.map((r) => r.path.slice('agent/'.length))
+  const childrenOf = (sub: string): string[] => {
+    const out = new Set<string>()
+    const prefix = `${sub}/`
+    for (const p of paths) {
+      if (!p.startsWith(prefix)) continue
+      const seg = p.slice(prefix.length).split('/')[0]
+      if (seg) out.add(seg)
+    }
+    return [...out]
   }
   return {
-    soul: existsSync(join(dir, SOUL_FILE)) || existsSync(join(dir, LEGACY_SOUL_FILE)),
-    tools: ls('tools'),
-    skills: ls('skills'),
-    data: ls('data'),
-    schedules: ls('schedules'),
-    channels: ls('channels'),
+    soul: paths.includes(SOUL_FILE) || paths.includes(LEGACY_SOUL_FILE),
+    tools: childrenOf('tools'),
+    skills: childrenOf('skills'),
+    data: childrenOf('data'),
+    schedules: childrenOf('schedules'),
+    channels: childrenOf('channels'),
   }
 }
 
 /** Read the agent's soul (falls back to the legacy instructions.md). */
-export function readSoul(id: string): string | null {
-  return readAgentFile(id, SOUL_FILE) ?? readAgentFile(id, LEGACY_SOUL_FILE)
+export async function readSoul(id: string): Promise<string | null> {
+  return (await readAgentFile(id, SOUL_FILE)) ?? (await readAgentFile(id, LEGACY_SOUL_FILE))
 }
 
 /** Seed soul.md from the draft/manifest if it doesn't exist yet (migrating any
  *  legacy instructions.md into soul.md). */
-export function ensureSoul(record: MiniappRecord): void {
-  if (readAgentFile(record.id, SOUL_FILE) != null) return
-  const legacy = readAgentFile(record.id, LEGACY_SOUL_FILE)
+export async function ensureSoul(record: MiniappRecord): Promise<void> {
+  if ((await readAgentFile(record.id, SOUL_FILE)) != null) return
+  const legacy = await readAgentFile(record.id, LEGACY_SOUL_FILE)
   if (legacy != null) {
-    writeAgentFile(record.id, SOUL_FILE, legacy)
+    await writeAgentFile(record.id, SOUL_FILE, legacy)
     return
   }
   const name = record.draft?.name ?? record.manifest?.name ?? 'Agent'
   const goal = record.draft?.goal ?? record.manifest?.description ?? ''
-  writeAgentFile(record.id, SOUL_FILE, `# ${name}\n\n${goal}\n`)
+  await writeAgentFile(record.id, SOUL_FILE, `# ${name}\n\n${goal}\n`)
 }
 
 export { SUBDIRS, SOUL_FILE }

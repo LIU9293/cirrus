@@ -42,7 +42,7 @@ function runVite(): Promise<{ code: number; out: string }> {
 }
 
 async function buildOnce(id: string): Promise<BuildResult> {
-  const files = readSourceFiles(id)
+  const files = await readSourceFiles(id)
   if (!files.some((f) => f.path === 'app/App.tsx')) {
     return { ok: false, error: 'Missing entry file app/App.tsx. Write the miniapp entry to app/App.tsx (default export a React component).' }
   }

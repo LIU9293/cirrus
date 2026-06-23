@@ -68,9 +68,9 @@ export async function planAndAttachSkills(record: MiniappRecord): Promise<PlanRe
   const skills = plan.items.map(planItemToSkill)
   // Re-load the record after the (slow) planning call so we don't clobber a
   // creationPhase the user advanced to while planning was in flight.
-  const fresh = loadRecord(record.id) ?? record
+  const fresh = (await loadRecord(record.id)) ?? record
   fresh.skills = skills
-  saveRecord(fresh)
+  await saveRecord(fresh)
   record.skills = skills
   return {
     plan,
@@ -103,7 +103,7 @@ export async function developSkill(
     skill.source = 'integration'
     skill.status = 'active'
     skill.config = { ...skill.config, endpoint: input.endpoint ?? '', auth: input.auth ?? '' }
-    saveRecord(record)
+    await saveRecord(record)
     return { ok: true, skill, message: `Connected ${skill.name}.` }
   }
 
@@ -111,14 +111,14 @@ export async function developSkill(
     skill.source = 'library'
     skill.status = 'active'
     skill.config = { ...skill.config, dataset: input.dataset ?? input.data ?? null }
-    saveRecord(record)
+    await saveRecord(record)
     return { ok: true, skill, message: `${skill.name} dataset attached.` }
   }
 
   // method === 'generate' — author the skill's code and smoke-test it in the sandbox.
   skill.source = 'generated'
   skill.status = 'building'
-  saveRecord(record)
+  await saveRecord(record)
 
   const code = await generateSkillCode(skill.name, String(skill.description ?? skill.name), String(input.notes ?? ''))
   const driver = getSandboxDriver()
@@ -127,16 +127,16 @@ export async function developSkill(
   if (test.ok) {
     // Folder model: the tool's source of truth is a file under agent/tools/.
     const file = `tools/${skill.name.replace(/[^a-zA-Z0-9_]+/g, '_').toLowerCase().slice(0, 40) || 'tool'}.ts`
-    writeAgentFile(record.id, file, code)
+    await writeAgentFile(record.id, file, code)
     skill.status = 'active'
     skill.config = { ...skill.config, file, code, sandbox: driver.name, sample: test.stdout.slice(0, 2000) }
-    saveRecord(record)
+    await saveRecord(record)
     return { ok: true, skill, message: `Generated ${skill.name} → ${file}, verified in the ${driver.name} sandbox.`, test }
   }
 
   skill.status = 'needs_dev'
   skill.config = { ...skill.config, code, sandbox: driver.name, lastError: test.error ?? test.stderr }
-  saveRecord(record)
+  await saveRecord(record)
   return {
     ok: false,
     skill,
@@ -156,7 +156,7 @@ export interface RefineResult {
 /** Per-capability "refine with AI": rewrite a single agent file from an instruction.
  *  Code files (.ts) are re-tested in the sandbox; markdown (.md) is rewritten directly. */
 export async function refineFile(record: MiniappRecord, path: string, instruction: string): Promise<RefineResult> {
-  const current = readAgentFile(record.id, path) ?? ''
+  const current = await readAgentFile(record.id, path) ?? ''
   const isCode = path.endsWith('.ts')
   const system = isCode
     ? [
@@ -191,12 +191,12 @@ export async function refineFile(record: MiniappRecord, path: string, instructio
     if (!test.ok) {
       return { ok: false, path, content: current, message: `New code failed in the sandbox: ${test.error ?? test.stderr}`, test }
     }
-    writeAgentFile(record.id, path, next)
-    saveRecord(record)
+    await writeAgentFile(record.id, path, next)
+    await saveRecord(record)
     return { ok: true, path, content: next, message: `Updated ${path}, re-tested in the sandbox.`, test }
   }
-  writeAgentFile(record.id, path, next)
-  saveRecord(record)
+  await writeAgentFile(record.id, path, next)
+  await saveRecord(record)
   return { ok: true, path, content: next, message: `Updated ${path}.` }
 }
 
@@ -284,7 +284,7 @@ function parseSkillContractUpdate(raw: string): SkillContractUpdate {
   return update
 }
 
-function applySkillContractUpdate(record: MiniappRecord, skillId: string, update: SkillContractUpdate): MiniappSkill | null {
+async function applySkillContractUpdate(record: MiniappRecord, skillId: string, update: SkillContractUpdate): Promise<MiniappSkill | null> {
   const skills = record.skills ?? []
   const index = skills.findIndex((s) => s.id === skillId)
   if (index < 0) return null
@@ -308,9 +308,9 @@ function applySkillContractUpdate(record: MiniappRecord, skillId: string, update
   record.skills = skills.map((skill, i) => (i === index ? nextSkill : skill))
   if (update.readme) {
     const fileSlug = nextSkill.name.replace(/[^a-zA-Z0-9_]+/g, '_').toLowerCase().slice(0, 40) || 'skill'
-    writeAgentFile(record.id, `skills/${fileSlug}/skill.md`, update.readme)
+    await writeAgentFile(record.id, `skills/${fileSlug}/skill.md`, update.readme)
   }
-  saveRecord(record)
+  await saveRecord(record)
   return nextSkill
 }
 
@@ -378,7 +378,7 @@ export async function chatAboutSkill(
   if (!last || last.role !== 'user') return { reply: '' }
 
   const fileSlug = skill.name.replace(/[^a-zA-Z0-9_]+/g, '_').toLowerCase().slice(0, 40) || 'skill'
-  const readme = readAgentFile(record.id, `skills/${fileSlug}/skill.md`) ?? ''
+  const readme = await readAgentFile(record.id, `skills/${fileSlug}/skill.md`) ?? ''
   const tools = (skill.tools ?? []).map((t) => `- ${t.name}: ${t.description ?? ''}`).join('\n')
   const platform = skill.platformSkillId ? findPlatformSkill(skill.platformSkillId) : undefined
   const creds = (skill.credentials ?? [])
@@ -500,7 +500,7 @@ export async function chatAboutSkill(
     const toolCall = message?.tool_calls?.find((call) => call.function.name === 'update_current_skill_contract')
     if (toolCall) {
       const update = parseSkillContractUpdate(toolCall.function.arguments)
-      const updatedSkill = applySkillContractUpdate(record, skill.id, update)
+      const updatedSkill = await applySkillContractUpdate(record, skill.id, update)
       if (!updatedSkill) return { reply: 'I could not find that skill to update.' }
       const fallback = [
         `Updated ${updatedSkill.name}.`,

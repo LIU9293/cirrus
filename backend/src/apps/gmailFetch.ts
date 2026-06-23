@@ -78,14 +78,23 @@ export function sourceToSnippet(source?: Buffer): string {
     .slice(0, 2000)
 }
 
-export function readGmailCredentials(recordId: string): { ok: true; cfg: any; user: string; pass: string } | { ok: false; error: string } {
-  const raw = readAgentFile(recordId, 'secrets/gmail.json')
-  if (!raw) return { ok: false, error: 'no agent/secrets/gmail.json' }
+export async function readGmailCredentials(
+  recordId: string,
+  override?: Record<string, unknown> | null,
+): Promise<{ ok: true; cfg: any; user: string; pass: string } | { ok: false; error: string }> {
+  // Prefer a resolved (runtime×agent) credential bag when given; else fall back
+  // to the agent's own secrets file.
   let cfg: any
-  try {
-    cfg = JSON.parse(raw)
-  } catch {
-    return { ok: false, error: 'secrets/gmail.json is not valid JSON' }
+  if (override && Object.keys(override).length) {
+    cfg = override
+  } else {
+    const raw = await readAgentFile(recordId, 'secrets/gmail.json')
+    if (!raw) return { ok: false, error: 'no agent/secrets/gmail.json' }
+    try {
+      cfg = JSON.parse(raw)
+    } catch {
+      return { ok: false, error: 'secrets/gmail.json is not valid JSON' }
+    }
   }
   const user = cfg.email || cfg.user || cfg.imap?.user
   const pass = cfg.app_password || cfg.appPassword || cfg.imap?.password || cfg.password
@@ -95,9 +104,9 @@ export function readGmailCredentials(recordId: string): { ok: true; cfg: any; us
   return { ok: true, cfg, user: String(user), pass: String(pass).replace(/\s+/g, '') }
 }
 
-export async function fetchGmailLive(recordId: string, maxN = 200, input?: GmailSearchInput | string): Promise<GmailFetchResult> {
+export async function fetchGmailLive(recordId: string, maxN = 200, input?: GmailSearchInput | string, credsOverride?: Record<string, unknown> | null): Promise<GmailFetchResult> {
   const search = normalizeSearch(input, maxN)
-  const creds = readGmailCredentials(recordId)
+  const creds = await readGmailCredentials(recordId, credsOverride)
   if (!creds.ok) return { ok: false, mode: 'none', error: creds.error }
 
   // @ts-ignore optional peer dependency
@@ -164,8 +173,8 @@ export async function fetchGmailLive(recordId: string, maxN = 200, input?: Gmail
   }
 }
 
-export async function modifyGmailLive(recordId: string, input: GmailModifyInput): Promise<GmailModifyResult> {
-  const creds = readGmailCredentials(recordId)
+export async function modifyGmailLive(recordId: string, input: GmailModifyInput, credsOverride?: Record<string, unknown> | null): Promise<GmailModifyResult> {
+  const creds = await readGmailCredentials(recordId, credsOverride)
   if (!creds.ok) return { ok: false, mode: 'none', error: creds.error }
   const operation = input.operation
   const messageIds = (input.messageIds ?? []).map((id) => String(id).trim()).filter(Boolean)

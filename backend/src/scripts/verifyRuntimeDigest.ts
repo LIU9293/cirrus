@@ -7,14 +7,14 @@ async function main() {
   const runtimeId = process.argv[2]
   const miniappId = process.argv[3] || process.argv.find((arg) => arg.startsWith('--miniapp='))?.slice('--miniapp='.length) || ''
   if (!runtimeId) throw new Error('Usage: npm run verify:runtime-digest -- <runtimeId> [miniappId]')
-  const runtime = loadRuntime(runtimeId)
+  const runtime = await loadRuntime(runtimeId)
   if (!runtime) throw new Error(`Runtime not found: ${runtimeId}`)
   const ownAgent = miniappId
     ? runtime.agents.find((agent) => agent.source === 'own' && agent.miniappId === miniappId)
     : runtime.agents.find((agent) => agent.source === 'own' && agent.miniappId)
   if (!ownAgent?.miniappId) throw new Error(`Runtime ${runtime.id} does not contain the requested own miniapp agent.`)
   if (runtime.sandboxKind !== 'e2b' || !runtime.sandboxId) throw new Error(`Runtime ${runtime.id} is not backed by E2B.`)
-  const record = loadRecord(ownAgent.miniappId)
+  const record = await loadRecord(ownAgent.miniappId)
   if (!record) throw new Error(`Miniapp not found: ${ownAgent.miniappId}`)
   const action = record.manifest?.actions.find((item) => item.id === 'run_gmail_digest')
   if (!action) throw new Error(`Miniapp ${record.id} does not declare run_gmail_digest.`)

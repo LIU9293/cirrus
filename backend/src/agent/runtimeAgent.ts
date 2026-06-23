@@ -8,9 +8,16 @@ import { saveRecord } from '../store.ts'
 import { runInboxTriage } from '../apps/inboxTriage.ts'
 import { runRuntimeAgentLoopInSandbox } from './sandboxAgent.ts'
 
+/** Identifies which runtime×agent binding to resolve skill settings/credentials
+ *  against. Absent for the dev/studio path (resolves the agent's own defaults). */
+export interface RuntimeBinding {
+  runtimeId?: string
+  agentKey?: string
+}
+
 /** The agent's soul (what it does) — prepended to the runtime system prompt. */
-function soulBlock(record: MiniappRecord): string {
-  const soul = readSoul(record.id)?.trim()
+async function soulBlock(record: MiniappRecord): Promise<string> {
+  const soul = (await readSoul(record.id))?.trim()
   return soul ? `The agent's soul (what you are and what you do):\n${soul}\n` : ''
 }
 
@@ -76,6 +83,7 @@ async function runAgent(
   record: MiniappRecord,
   system: string,
   history: ChatTurn[],
+  binding?: RuntimeBinding,
 ): Promise<{ message: string; patched: boolean; activities: DeveloperChatActivity[] }> {
   const activities: DeveloperChatActivity[] = []
   const userTurn = history.at(-1)
@@ -85,17 +93,18 @@ async function runAgent(
   const model = makeModel()
   const before = record.stateVersion
 
+  const tools = await makeRuntimeTools(Type, record, { record, ...binding }, {
+    onActivity: (activity) => {
+      if (activity.kind === 'call') activities.push({ kind: 'tool', text: activity.summary })
+      else if (!activity.ok) activities.push({ kind: 'error', text: `${activity.name} failed${activity.detail ? `: ${activity.detail}` : ''}`, ok: false })
+    },
+  })
   const agent = new Agent({
     initialState: {
       systemPrompt: system,
       model,
       thinkingLevel: 'off',
-      tools: makeRuntimeTools(Type, record, {
-        onActivity: (activity) => {
-          if (activity.kind === 'call') activities.push({ kind: 'tool', text: activity.summary })
-          else if (!activity.ok) activities.push({ kind: 'error', text: `${activity.name} failed${activity.detail ? `: ${activity.detail}` : ''}`, ok: false })
-        },
-      }),
+      tools,
       messages: history.slice(0, -1).map((turn, index) => turnToMessage(turn, model, index)),
     },
     getApiKey: () => config.apiKey,
@@ -153,6 +162,7 @@ export async function runRuntimeAction(
   record: MiniappRecord,
   action: ActionSpec,
   payload: unknown,
+  binding?: RuntimeBinding,
 ): Promise<RuntimeActionOutcome> {
   if (action.id === 'run_gmail_digest') {
     const sandboxId = sandboxIdFromPayload(payload)
@@ -185,10 +195,11 @@ export async function runRuntimeAction(
 
   const sandboxId = sandboxIdFromPayload(payload)
   const manifest = record.manifest
+  const soul = await soulBlock(record)
   const system = [
     `You are the runtime agent for the miniapp "${manifest?.name ?? record.id}".`,
     runtimeEnvironmentBlock(sandboxId),
-    soulBlock(record),
+    soul,
     'A UI control invoked an action. When the instruction names or implies one of your skills, CALL that',
     "skill's tool to do the work (don't do it inline) — that keeps the app's capabilities explicit. Then call",
     'patch_state to update the shared state the UI renders from. Keep state JSON-serializable and minimal.',
@@ -214,8 +225,8 @@ export async function runRuntimeAction(
   ].join('\n')
 
   const { message, patched } = sandboxId
-    ? await runRuntimeAgentLoopInSandbox(record, sandboxId, system, [{ role: 'user', content: user }])
-    : await runAgent(record, system, [{ role: 'user', content: user }])
+    ? await runRuntimeAgentLoopInSandbox(record, sandboxId, system, [{ role: 'user', content: user }], binding)
+    : await runAgent(record, system, [{ role: 'user', content: user }], binding)
   return {
     ok: patched,
     message: message || (patched ? 'Updated.' : 'No change.'),
@@ -227,14 +238,15 @@ export async function runRuntimeAction(
 export async function runRuntimeChat(
   record: MiniappRecord,
   history: ChatTurn[],
-  opts: { sandboxId?: string | null; terrRuntimeContext?: string } = {},
+  opts: { sandboxId?: string | null; terrRuntimeContext?: string; binding?: RuntimeBinding } = {},
 ): Promise<RuntimeChatOutcome> {
   const manifest = record.manifest
+  const soul = await soulBlock(record)
   const system = [
     `You are the live app agent for the miniapp "${manifest?.name ?? record.id}".`,
     runtimeEnvironmentBlock(opts.sandboxId),
     opts.terrRuntimeContext ? `TerrRuntimeAgent context:\n${opts.terrRuntimeContext}` : '',
-    soulBlock(record),
+    soul,
     'You are talking to an end user using the app. Help them use it. When they ask you to change app data,',
     'call patch_state to shallow-merge JSON-serializable updates into the shared state.',
     'IMPORTANT: for anything about the app\'s OWN data/records (datasets, saved rows), you MUST call the relevant',
@@ -255,8 +267,8 @@ export async function runRuntimeChat(
   ].join('\n')
 
   const { message, patched, activities } = opts.sandboxId
-    ? await runRuntimeAgentLoopInSandbox(record, opts.sandboxId, system, history)
-    : await runAgent(record, system, history)
+    ? await runRuntimeAgentLoopInSandbox(record, opts.sandboxId, system, history, opts.binding)
+    : await runAgent(record, system, history, opts.binding)
   return {
     ok: true,
     patched,

@@ -1,8 +1,10 @@
 import express from 'express'
+import type { Request, Response, NextFunction } from 'express'
 import cors from 'cors'
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { config } from './config.ts'
+import { registerAuthRoutes, requireAuth } from './auth/index.ts'
+import * as db from './db.ts'
 import { createMiniapp, deleteMiniapp, listRecords, loadRecord, saveRecord } from './store.ts'
 import { runDeveloperAgent, type ChatTurn, type AgentEvent } from './agent/developerAgent.ts'
 import {
@@ -16,6 +18,7 @@ import {
 } from './agent/terrRuntimeAgent.ts'
 import { resolveCanvasScreenshot } from './canvasScreenshot.ts'
 import { PLATFORM_SKILLS } from './skills/library.ts'
+import { resolveSkillSettings, writeSkillSettings, settingsFilled, declaredSettings, skillBindingKey, type SkillBindingContext } from './skills/settings.ts'
 import { planAndAttachSkills, developSkill, refineFile, chatAboutSkill, chatAboutSurface } from './skills/service.ts'
 import { listAgentTree, readAgentFile, writeAgentFile, ensureSoul } from './agentfs.ts'
 import { getDatastoreDriver } from './datastore/index.ts'
@@ -40,15 +43,30 @@ import {
 } from '../../shared/protocol.ts'
 
 const app = express()
-app.use(cors())
+app.use(cors({ origin: true, credentials: true })) // reflect origin + allow session cookie
 app.use(express.json({ limit: '4mb' }))
 
-function runtimeSecretPath(runtimeId: string, key: string) {
-  const safe = key.replace(/[^a-zA-Z0-9._-]+/g, '_')
-  const dir = resolve(config.dataDir, 'runtimes', runtimeId, 'secrets')
-  mkdirSync(dir, { recursive: true })
-  return join(dir, `${safe}.model.json`)
+// Auth endpoints (public). Everything under /api/miniapps and /api/runtimes is
+// gated to the signed-in user and scoped to data they own.
+registerAuthRoutes(app)
+
+async function requireOwnMiniapp(req: Request, res: Response, next: NextFunction) {
+  const record = await loadRecord(req.params.id)
+  if (!record) return res.status(404).json({ error: 'not found' })
+  if (record.ownerId && req.userId && record.ownerId !== req.userId) return res.status(404).json({ error: 'not found' })
+  next()
 }
+async function requireOwnRuntime(req: Request, res: Response, next: NextFunction) {
+  const runtime = await loadRuntime(req.params.id)
+  if (!runtime) return res.status(404).json({ error: 'not found' })
+  if (runtime.ownerId && req.userId && runtime.ownerId !== req.userId) return res.status(404).json({ error: 'not found' })
+  next()
+}
+
+app.use('/api/miniapps', requireAuth)
+app.use('/api/miniapps/:id', requireOwnMiniapp)
+app.use('/api/runtimes', requireAuth)
+app.use('/api/runtimes/:id', requireOwnRuntime)
 
 // Strip the built html from list responses to keep them light.
 function summary(record: MiniappRecord) {
@@ -69,35 +87,35 @@ function activityToEvent(activity: NonNullable<DeveloperChatMessage['activities'
   return { type: 'status', text: activity.text }
 }
 
-app.get('/api/health', (_req, res) => {
+app.get('/api/health', async (_req, res) => {
   res.json({ ok: true, model: config.model })
 })
 
-app.get('/api/miniapps', (_req, res) => {
-  res.json({ miniapps: listRecords().map(summary) })
+app.get('/api/miniapps', async (req, res) => {
+  res.json({ miniapps: (await listRecords(req.userId!)).map(summary) })
 })
 
-app.post('/api/miniapps', (_req, res) => {
-  const record = createMiniapp()
+app.post('/api/miniapps', async (req, res) => {
+  const record = await createMiniapp(req.userId!)
   res.json({ miniapp: summary(record) })
 })
 
-app.get('/api/miniapps/:id', (req, res) => {
-  const record = loadRecord(req.params.id)
+app.get('/api/miniapps/:id', async (req, res) => {
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   res.json({ miniapp: record })
 })
 
 app.delete('/api/miniapps/:id', async (req, res) => {
   await getDatastoreDriver().drop(req.params.id).catch(() => {})
-  const deleted = deleteMiniapp(req.params.id)
+  const deleted = await deleteMiniapp(req.params.id)
   if (!deleted) return res.status(404).json({ error: 'not found' })
   res.json({ ok: true })
 })
 
 // Load data into the instance's datastore (paste JSON / CSV → a table the skill owns).
 app.post('/api/miniapps/:id/datastore/load', async (req, res) => {
-  const record = loadRecord(req.params.id)
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const body = req.body ?? {}
   const result = await loadDataset(record, {
@@ -112,7 +130,7 @@ app.post('/api/miniapps/:id/datastore/load', async (req, res) => {
 
 // Preview/query a datastore table (structured, scoped — no raw SQL).
 app.post('/api/miniapps/:id/datastore/query', async (req, res) => {
-  const record = loadRecord(req.params.id)
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const body = req.body ?? {}
   try {
@@ -129,77 +147,61 @@ app.post('/api/miniapps/:id/datastore/query', async (req, res) => {
 })
 
 app.get('/api/miniapps/:id/datastore/tables', async (req, res) => {
-  const record = loadRecord(req.params.id)
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   res.json({ tables: await listTables(record) })
 })
 
-app.post('/api/miniapps/:id/freeze', (req, res) => {
-  const record = loadRecord(req.params.id)
+app.post('/api/miniapps/:id/freeze', async (req, res) => {
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   record.frozen = !record.frozen
   record.status = record.frozen ? 'frozen' : record.html ? 'ready' : 'draft'
-  saveRecord(record)
+  await saveRecord(record)
   res.json({ miniapp: summary(record) })
 })
 
-app.put('/api/miniapps/:id/messages', (req, res) => {
-  const record = loadRecord(req.params.id)
+app.put('/api/miniapps/:id/messages', async (req, res) => {
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const messages = Array.isArray(req.body?.messages) ? (req.body.messages as DeveloperChatMessage[]) : []
   record.messages = messages
-  saveRecord(record)
+  await saveRecord(record)
   res.json({ miniapp: summary(record) })
 })
 
-app.put('/api/miniapps/:id/live-messages', (req, res) => {
-  const record = loadRecord(req.params.id)
+app.put('/api/miniapps/:id/live-messages', async (req, res) => {
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const messages = Array.isArray(req.body?.messages) ? (req.body.messages as DeveloperChatMessage[]) : []
   record.liveMessages = messages
-  saveRecord(record)
+  await saveRecord(record)
   res.json({ miniapp: summary(record) })
 })
 
-// In-product authorization: the user grants a capability access to an external
-// account ON THE PAGE. Writes the secret into the agent folder and marks the
-// matching skill connected. (App Password / IMAP for Gmail; security later.)
-// Generic skill credentials — the user configures a skill's declared credential
-// fields. Secret values are written to the agent's secrets folder (keyed by the
-// skill's platform id when built-in, else its id) and never returned to the client.
-app.post('/api/miniapps/:id/skills/:skillId/credentials', (req, res) => {
-  const record = loadRecord(req.params.id)
+// Skill settings — the DEV/default binding. The creator configures a skill's
+// declared settings (credentials + non-secret config) for their own studio. This
+// is the agent's own default binding; runtimes that import the agent override it
+// with their own values via the runtime-scoped endpoint below. Secret values are
+// written to the agent's secrets folder and never returned to the client.
+app.post('/api/miniapps/:id/skills/:skillId/credentials', async (req, res) => {
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const skill = (record.skills ?? []).find((s) => s.id === req.params.skillId)
   if (!skill) return res.status(404).json({ error: 'unknown skill' })
-  const fields = skill.credentials ?? []
-  if (!fields.length) return res.status(400).json({ error: 'skill has no credentials' })
+  if (!declaredSettings(skill).length) return res.status(400).json({ error: 'skill has no settings' })
   const values = (req.body?.values ?? {}) as Record<string, unknown>
-  const secretName = `secrets/${skill.platformSkillId ?? skill.id}.json`
-  let existing: Record<string, string> = {}
-  try {
-    existing = JSON.parse(readAgentFile(record.id, secretName) ?? '{}')
-  } catch {
-    existing = {}
-  }
-  const merged = { ...existing }
-  for (const f of fields) {
-    const v = String(values[f.key] ?? '').trim()
-    if (v) merged[f.key] = v
-  }
-  writeAgentFile(record.id, secretName, JSON.stringify(merged, null, 2))
-  skill.credentialsFilled = fields.map((f) => f.key).filter((k) => merged[k])
-  saveRecord(record)
-  // Echo back which keys are filled + non-secret values only (never return secrets).
-  const publicValues: Record<string, string> = {}
-  for (const f of fields) if (!f.secret && merged[f.key]) publicValues[f.key] = merged[f.key]
-  res.json({ ok: true, skillId: skill.id, credentialsFilled: skill.credentialsFilled, values: publicValues })
+  const ctx: SkillBindingContext = { record }
+  const result = await writeSkillSettings(ctx, skill, values)
+  skill.credentialsFilled = await settingsFilled(ctx, skill)
+  await saveRecord(record)
+  res.json({ ok: true, skillId: skill.id, credentialsFilled: skill.credentialsFilled, values: result.publicValues })
 })
 
 // Define-step concept interview: ask clarifying questions until the idea is a
 // complete agent-native concept, then return name + goal (saved to the draft).
 app.post('/api/miniapps/:id/define/clarify', async (req, res) => {
-  const record = loadRecord(req.params.id)
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const history = (req.body?.history ?? []) as ChatTurn[]
   const context = typeof req.body?.context === 'string' ? req.body.context : ''
@@ -220,46 +222,46 @@ app.post('/api/miniapps/:id/define/clarify', async (req, res) => {
   if (result.ready) {
     record.draft = { ...record.draft, name: result.name, goal: result.goal }
   }
-  saveRecord(record)
+  await saveRecord(record)
   res.json({ ...result, miniapp: summary(record) })
 })
 
 // --- Agent folder (filesystem-first capability model) ---
-app.get('/api/miniapps/:id/agent/tree', (req, res) => {
-  const record = loadRecord(req.params.id)
+app.get('/api/miniapps/:id/agent/tree', async (req, res) => {
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
-  ensureSoul(record)
+  await ensureSoul(record)
   res.json({ tree: listAgentTree(record.id) })
 })
 
-app.get('/api/miniapps/:id/agent/file', (req, res) => {
-  const record = loadRecord(req.params.id)
+app.get('/api/miniapps/:id/agent/file', async (req, res) => {
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const path = String(req.query.path ?? '')
   // Soul self-heals: seed it from Define (or migrate legacy instructions.md) on first read.
-  if (path === 'soul.md') ensureSoul(record)
-  const content = readAgentFile(record.id, path)
+  if (path === 'soul.md') await ensureSoul(record)
+  const content = await readAgentFile(record.id, path)
   if (content == null) return res.status(404).json({ error: 'no such file' })
   res.json({ path, content })
 })
 
 // Write/overwrite an agent file directly (e.g. editing instructions.md or a tool).
-app.put('/api/miniapps/:id/agent/file', (req, res) => {
-  const record = loadRecord(req.params.id)
+app.put('/api/miniapps/:id/agent/file', async (req, res) => {
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const path = String(req.body?.path ?? '')
   const content = String(req.body?.content ?? '')
   if (!path) return res.status(400).json({ error: 'path is required' })
-  writeAgentFile(record.id, path, content)
+  await writeAgentFile(record.id, path, content)
   res.json({ ok: true, path })
 })
 
 // Test a tool file by running it in the sandbox (optional input via __INPUT__).
 app.post('/api/miniapps/:id/agent/run-tool', async (req, res) => {
-  const record = loadRecord(req.params.id)
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const path = String(req.body?.path ?? '')
-  const code = readAgentFile(record.id, path)
+  const code = await readAgentFile(record.id, path)
   if (code == null) return res.status(404).json({ error: 'no such file' })
   const input = req.body?.input ?? {}
   const wrapped = `globalThis.__INPUT__ = ${JSON.stringify(input)};\n${code}`
@@ -269,7 +271,7 @@ app.post('/api/miniapps/:id/agent/run-tool', async (req, res) => {
 
 // Skill-scoped chat: discuss/refine one skill, grounded in its contract.
 app.post('/api/miniapps/:id/skills/:skillId/chat', async (req, res) => {
-  const record = loadRecord(req.params.id)
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const history = (req.body?.history ?? []) as { role: 'user' | 'assistant'; content: string }[]
   const out = await chatAboutSkill(record, req.params.skillId, history)
@@ -278,7 +280,7 @@ app.post('/api/miniapps/:id/skills/:skillId/chat', async (req, res) => {
 
 // Surface-scoped chat: discuss/refine one surface, with the full agent context.
 app.post('/api/miniapps/:id/surfaces/:surfaceId/chat', async (req, res) => {
-  const record = loadRecord(req.params.id)
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const history = (req.body?.history ?? []) as { role: 'user' | 'assistant'; content: string }[]
   const out = await chatAboutSurface(record, req.params.surfaceId, history)
@@ -288,13 +290,13 @@ app.post('/api/miniapps/:id/surfaces/:surfaceId/chat', async (req, res) => {
 // Test one skill tool call by name — runs the SAME tool the runtime agent would
 // call (built-in handler or custom script), with sample input + injected credentials.
 app.post('/api/miniapps/:id/skills/:skillId/tools/:toolName/test', async (req, res) => {
-  const record = loadRecord(req.params.id)
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const input = req.body?.input ?? {}
   try {
     const { Type } = await import('@earendil-works/pi-ai')
     const { makeRuntimeTools } = await import('./agent/skillTools.ts')
-    const tool = makeRuntimeTools(Type as any, record).find((t) => t.name === req.params.toolName)
+    const tool = (await makeRuntimeTools(Type as any, record)).find((t) => t.name === req.params.toolName)
     if (!tool) return res.status(404).json({ ok: false, error: `tool not active: ${req.params.toolName}` })
     const r: any = await tool.execute('test', { input, ...input })
     res.json({ ok: true, result: r?.details ?? null })
@@ -305,7 +307,7 @@ app.post('/api/miniapps/:id/skills/:skillId/tools/:toolName/test', async (req, r
 
 // Per-capability "refine with AI": rewrite one agent file from an instruction.
 app.post('/api/miniapps/:id/agent/refine', async (req, res) => {
-  const record = loadRecord(req.params.id)
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const path = String(req.body?.path ?? '')
   const instruction = String(req.body?.instruction ?? '')
@@ -314,7 +316,7 @@ app.post('/api/miniapps/:id/agent/refine', async (req, res) => {
 })
 
 // The platform Skills Library (catalog).
-app.get('/api/skills/library', (_req, res) => {
+app.get('/api/skills/library', async (_req, res) => {
   const visible = new Set(['gmail', 'github', 'http_request', 'database'])
   res.json({ skills: PLATFORM_SKILLS.filter((skill) => visible.has(skill.id)) })
 })
@@ -322,7 +324,7 @@ app.get('/api/skills/library', (_req, res) => {
 // Analyse the app's goal and attach the planned skills (auto-add library matches,
 // flag the gaps as needs_dev). Returns the full plan.
 app.post('/api/miniapps/:id/skills/plan', async (req, res) => {
-  const record = loadRecord(req.params.id)
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const result = await planAndAttachSkills(record)
   res.json(result)
@@ -330,7 +332,7 @@ app.post('/api/miniapps/:id/skills/plan', async (req, res) => {
 
 // Build one missing (needs_dev) skill via the chosen method.
 app.post('/api/miniapps/:id/skills/develop', async (req, res) => {
-  const record = loadRecord(req.params.id)
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const skillId = String(req.body?.skillId ?? '')
   const method = String(req.body?.method ?? 'generate') as SkillDevelopMethod
@@ -340,20 +342,20 @@ app.post('/api/miniapps/:id/skills/develop', async (req, res) => {
 })
 
 // Persist the guided-creation flow state (phase, draft identity, skills).
-app.put('/api/miniapps/:id/flow', (req, res) => {
-  const record = loadRecord(req.params.id)
+app.put('/api/miniapps/:id/flow', async (req, res) => {
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const body = (req.body ?? {}) as Partial<Pick<MiniappRecord, 'creationPhase' | 'draft' | 'skills' | 'defineMessages'>>
   if (body.creationPhase) record.creationPhase = body.creationPhase
   if (body.draft) record.draft = { ...record.draft, ...body.draft }
   if (Array.isArray(body.skills)) record.skills = body.skills
   if (Array.isArray(body.defineMessages)) record.defineMessages = body.defineMessages
-  saveRecord(record)
+  await saveRecord(record)
   res.json({ miniapp: summary(record) })
 })
 
 app.post('/api/miniapps/:id/live-chat', async (req, res) => {
-  const record = loadRecord(req.params.id)
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const history = (req.body?.history ?? []) as ChatTurn[]
   const agentRef: RuntimeAgentRef = {
@@ -369,8 +371,8 @@ app.post('/api/miniapps/:id/live-chat', async (req, res) => {
   return res.json(outcome)
 })
 
-app.post('/api/miniapps/:id/canvas-screenshot-responses', (req, res) => {
-  const record = loadRecord(req.params.id)
+app.post('/api/miniapps/:id/canvas-screenshot-responses', async (req, res) => {
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const requestId = String(req.body?.requestId ?? '')
   const imageUrl = typeof req.body?.imageUrl === 'string' ? req.body.imageUrl : ''
@@ -387,7 +389,7 @@ app.post('/api/miniapps/:id/canvas-screenshot-responses', (req, res) => {
 
 // Developer-agent chat: streams build progress as Server-Sent Events.
 app.post('/api/miniapps/:id/chat', async (req, res) => {
-  const record = loadRecord(req.params.id)
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const history = (req.body?.history ?? []) as ChatTurn[]
 
@@ -419,7 +421,7 @@ async function runMiniappHostAction(record: MiniappRecord, actionId: string, pay
     }
     record.state = { ...record.state, ...patch }
     record.stateVersion += 1
-    saveRecord(record)
+    await saveRecord(record)
     return { ok: true, message: 'State updated.', state: record.state, stateVersion: record.stateVersion }
   }
 
@@ -435,16 +437,19 @@ async function runMiniappHostAction(record: MiniappRecord, actionId: string, pay
     }
     record.state = { ...record.state, ...patch }
     record.stateVersion += 1
-    saveRecord(record)
+    await saveRecord(record)
     return { ok: true, message: 'State updated.', state: record.state, stateVersion: record.stateVersion }
   }
 
-  // kind: 'agent'
-  return await runTerrRuntimeAction(record, action, payload)
+  // kind: 'agent'. When invoked inside a runtime, the payload carries runtimeId so
+  // skill settings/credentials resolve against this runtime's per-agent binding.
+  const runtimeId = isPlainObject(payload) && typeof payload.runtimeId === 'string' ? payload.runtimeId : undefined
+  const binding = runtimeId ? { runtimeId, agentKey: `own:${record.id}` } : undefined
+  return await runTerrRuntimeAction(record, action, payload, binding)
 }
 
 app.post('/api/miniapps/:id/actions', async (req, res) => {
-  const record = loadRecord(req.params.id)
+  const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const actionId = String(req.body?.actionId ?? '')
   const payload = req.body?.payload ?? {}
@@ -470,7 +475,7 @@ async function refreshRuntimeStatus(runtime: RuntimeRecord): Promise<RuntimeReco
   const result = await getRuntimeSandboxStatus(runtime.sandboxId)
   if (runtime.status === result.status && (runtime.sandboxError ?? null) === (result.error ?? null)) return runtime
   const next = { ...runtime, status: result.status, sandboxError: result.error ?? null }
-  saveRuntime(next)
+  await saveRuntime(next)
   return next
 }
 
@@ -499,29 +504,29 @@ async function installRuntimeCommunityAgents(runtime: RuntimeRecord): Promise<Ru
     }
     agents.push(installing)
     runtime.agents = agents.concat(originalAgents.slice(agents.length))
-    saveRuntime(runtime)
+    await saveRuntime(runtime)
     const installed = await installCommunityAgentInSandbox(runtime.sandboxId, installing)
     agents[agents.length - 1] = installed
   }
   if (!changed) return runtime
   runtime.agents = agents
-  saveRuntime(runtime)
+  await saveRuntime(runtime)
   return runtime
 }
 
-app.get('/api/runtimes', async (_req, res) => {
-  const runtimes = await Promise.all(listRuntimes().map(refreshRuntimeStatus))
+app.get('/api/runtimes', async (req, res) => {
+  const runtimes = await Promise.all((await listRuntimes(req.userId!)).map(refreshRuntimeStatus))
   res.json({ runtimes: runtimes.map(publicRuntime) })
 })
 
 app.get('/api/runtimes/:id', async (req, res) => {
-  const runtime = loadRuntime(req.params.id)
+  const runtime = await loadRuntime(req.params.id)
   if (!runtime) return res.status(404).json({ error: 'not found' })
   res.json({ runtime: publicRuntime(await refreshRuntimeStatus(runtime)) })
 })
 
 app.post('/api/runtimes/:id/diagnostics/network', async (req, res) => {
-  const runtime = loadRuntime(req.params.id)
+  const runtime = await loadRuntime(req.params.id)
   if (!runtime) return res.status(404).json({ error: 'not found' })
   const result = await diagnoseRuntimeNetwork(runtime)
   if (!result.ok && result.error === 'Runtime is not backed by an E2B sandbox.') return res.status(400).json({ ...result, runtime: publicRuntime(runtime) })
@@ -529,7 +534,7 @@ app.post('/api/runtimes/:id/diagnostics/network', async (req, res) => {
 })
 
 app.post('/api/runtimes/:id/diagnostics/gmail', async (req, res) => {
-  const runtime = loadRuntime(req.params.id)
+  const runtime = await loadRuntime(req.params.id)
   if (!runtime) return res.status(404).json({ error: 'not found' })
   const miniappId = typeof req.body?.miniappId === 'string' ? req.body.miniappId : ''
   const result = await diagnoseRuntimeGmail(runtime, miniappId)
@@ -543,70 +548,70 @@ app.post('/api/runtimes/:id/diagnostics/gmail', async (req, res) => {
 // action runner, and it is the correct hook for moving own-agent execution fully
 // into the runtime sandbox.
 app.post('/api/runtimes/:id/miniapps/:miniappId/actions', async (req, res) => {
-  const runtime = loadRuntime(req.params.id)
+  const runtime = await loadRuntime(req.params.id)
   if (!runtime) return res.status(404).json({ error: 'runtime not found' })
   if (!runtime.agents.some((agent) => agent.source === 'own' && agent.miniappId === req.params.miniappId)) {
     return res.status(403).json({ error: 'miniapp is not attached to this runtime' })
   }
-  const record = loadRecord(req.params.miniappId)
+  const record = await loadRecord(req.params.miniappId)
   if (!record) return res.status(404).json({ error: 'miniapp not found' })
   const actionId = String(req.body?.actionId ?? '')
   const payload = { ...(isPlainObject(req.body?.payload) ? req.body.payload : {}), runtimeId: runtime.id, sandboxId: runtime.sandboxId }
   res.json(await runMiniappHostAction(record, actionId, payload))
 })
 
-app.post('/api/runtimes', (req, res) => {
+app.post('/api/runtimes', async (req, res) => {
   const name = String(req.body?.name ?? '')
   const agents = (Array.isArray(req.body?.agents) ? req.body.agents : []) as RuntimeAgentRef[]
   if (agents.length === 0) return res.status(400).json({ error: 'A runtime needs at least one agent.' })
 
-  const runtime = createRuntime(name, agents)
+  const runtime = await createRuntime(req.userId!, name, agents)
   res.json({ runtime: publicRuntime(runtime) })
 
   // Provision the real sandbox in the background; the client polls GET for status.
   void provisionRuntimeSandbox()
-    .then((result) => {
-      const fresh = loadRuntime(runtime.id)
+    .then(async (result) => {
+      const fresh = await loadRuntime(runtime.id)
       if (!fresh) return
       fresh.sandboxKind = result.kind
       fresh.sandboxId = result.sandboxId
       fresh.sandboxError = result.error ?? null
       fresh.status = result.kind === 'e2b' ? 'running' : 'local'
-      saveRuntime(fresh)
-      if (fresh.sandboxKind === 'e2b' && fresh.sandboxId) void installRuntimeCommunityAgents(fresh).catch((err) => {
-        const latest = loadRuntime(fresh.id)
+      await saveRuntime(fresh)
+      if (fresh.sandboxKind === 'e2b' && fresh.sandboxId) void installRuntimeCommunityAgents(fresh).catch(async (err) => {
+        const latest = await loadRuntime(fresh.id)
         if (!latest) return
         latest.sandboxError = String((err as Error)?.message ?? err)
-        saveRuntime(latest)
+        await saveRuntime(latest)
       })
     })
-    .catch((err) => {
-      const fresh = loadRuntime(runtime.id)
+    .catch(async (err) => {
+      const fresh = await loadRuntime(runtime.id)
       if (!fresh) return
       fresh.status = 'error'
       fresh.sandboxError = String((err as Error)?.message ?? err)
-      saveRuntime(fresh)
+      await saveRuntime(fresh)
     })
 })
 
-app.patch('/api/runtimes/:id', (req, res) => {
-  const runtime = loadRuntime(req.params.id)
+app.patch('/api/runtimes/:id', async (req, res) => {
+  const runtime = await loadRuntime(req.params.id)
   if (!runtime) return res.status(404).json({ error: 'not found' })
   const name = String(req.body?.name ?? '').trim()
   if (!name) return res.status(400).json({ error: 'Runtime name is required.' })
   runtime.name = name
-  saveRuntime(runtime)
+  await saveRuntime(runtime)
   res.json({ runtime: publicRuntime(runtime) })
 })
 
 app.delete('/api/runtimes/:id', async (req, res) => {
-  const runtime = loadRuntime(req.params.id)
+  const runtime = await loadRuntime(req.params.id)
   if (!runtime) return res.status(404).json({ error: 'not found' })
   // Do not manually kill E2B sandboxes when a runtime is removed from the
   // local studio. E2B should auto-pause/expire them from their idle timeout so
   // we can reconnect by id during the timeout window and avoid destructive
   // cleanup as the default behavior.
-  deleteRuntime(req.params.id)
+  await deleteRuntime(req.params.id)
   res.json({ ok: true })
 })
 
@@ -615,7 +620,7 @@ app.delete('/api/runtimes/:id', async (req, res) => {
 // coordination decision, then hand off to the selected own or community agent.
 app.post('/api/runtimes/:id/chat', async (req, res) => {
   const startedAt = Date.now()
-  let runtime = loadRuntime(req.params.id)
+  let runtime = await loadRuntime(req.params.id)
   if (!runtime) return res.status(404).json({ error: 'not found' })
   const wantsStream = req.query.stream === '1' || String(req.headers.accept ?? '').includes('text/event-stream')
   const emit = (event: AgentEvent) => {
@@ -636,7 +641,7 @@ app.post('/api/runtimes/:id/chat', async (req, res) => {
   const ownRecordsByMiniappId = new Map<string, MiniappRecord>()
   for (const agent of runtime.agents) {
     if (agent.source !== 'own' || !agent.miniappId) continue
-    const record = loadRecord(agent.miniappId)
+    const record = await loadRecord(agent.miniappId)
     if (record) ownRecordsByMiniappId.set(agent.miniappId, record)
   }
   const routing = decideTerrRuntimeRouting(runtime.agents.length)
@@ -657,6 +662,7 @@ app.post('/api/runtimes/:id/chat', async (req, res) => {
       routing,
       agentSpecs,
       route,
+      binding: { runtimeId: runtime.id, agentKey: selectedAgent!.key },
     })
     message = outcome.message
     activities = outcome.activities ?? []
@@ -695,7 +701,7 @@ app.post('/api/runtimes/:id/chat', async (req, res) => {
     runtime.messages.push({ id: 'm-' + now.toString(36), role: 'user', content: userTurn.content })
   }
   runtime.messages.push({ id: 'a-' + now.toString(36), role: 'assistant', content: message, durationMs, activities })
-  saveRuntime(runtime)
+  await saveRuntime(runtime)
 
   if (wantsStream) {
     for (const activity of activities) emit(activityToEvent(activity))
@@ -710,20 +716,20 @@ app.post('/api/runtimes/:id/chat', async (req, res) => {
 })
 
 app.post('/api/runtimes/:id/agents', async (req, res) => {
-  const runtime = loadRuntime(req.params.id)
+  const runtime = await loadRuntime(req.params.id)
   if (!runtime) return res.status(404).json({ error: 'not found' })
   const agent = req.body?.agent as RuntimeAgentRef | undefined
   if (!agent?.key || !agent?.name) return res.status(400).json({ error: 'agent { key, name } is required.' })
   if (!runtime.agents.some((a) => a.key === agent.key)) {
     runtime.agents.push(normalizeRuntimeAgentRef(agent))
-    saveRuntime(runtime)
+    await saveRuntime(runtime)
     if (runtime.sandboxKind === 'e2b' && runtime.sandboxId) await installRuntimeCommunityAgents(runtime).catch(() => runtime)
   }
   res.json({ runtime: publicRuntime(runtime) })
 })
 
 app.patch('/api/runtimes/:id/agents/:key/model-config', async (req, res) => {
-  const runtime = loadRuntime(req.params.id)
+  const runtime = await loadRuntime(req.params.id)
   if (!runtime) return res.status(404).json({ error: 'not found' })
   const key = req.params.key
   const agent = runtime.agents.find((a) => a.key === key)
@@ -734,9 +740,11 @@ app.patch('/api/runtimes/:id/agents/:key/model-config', async (req, res) => {
   if (!['platform', 'custom_llm_api', 'subscription_auth'].includes(mode)) return res.status(400).json({ error: 'unsupported model config mode.' })
   const customApiKey = typeof body.customApiKey === 'string' ? body.customApiKey.trim() : ''
   if (customApiKey) {
-    writeFileSync(
-      runtimeSecretPath(runtime.id, agent.key),
-      JSON.stringify({ customApiKey, updatedAt: new Date().toISOString() }, null, 2),
+    const path = `secrets/${agent.key.replace(/[^a-zA-Z0-9._-]+/g, '_')}.model.json`
+    await db.query(
+      `insert into runtime_files (runtime_id, path, content, updated_at) values ($1, $2, $3, now())
+       on conflict (runtime_id, path) do update set content = excluded.content, updated_at = now()`,
+      [runtime.id, path, JSON.stringify({ customApiKey, updatedAt: new Date().toISOString() }, null, 2)],
     )
   }
   agent.modelConfig = {
@@ -748,20 +756,90 @@ app.patch('/api/runtimes/:id/agents/:key/model-config', async (req, res) => {
     subscriptionProvider: typeof body.subscriptionProvider === 'string' ? body.subscriptionProvider : agent.modelConfig?.subscriptionProvider,
     authStatus: typeof body.authStatus === 'string' ? body.authStatus : agent.modelConfig?.authStatus,
   }
-  saveRuntime(runtime)
+  await saveRuntime(runtime)
   res.json({ runtime: publicRuntime(runtime) })
 })
 
-app.delete('/api/runtimes/:id/agents/:key', (req, res) => {
-  const runtime = loadRuntime(req.params.id)
+// List an own-agent's active skills and their settings status FOR THIS RUNTIME.
+// Returns the declared settings (redacted: secret values are never sent, only a
+// `filled` flag) plus the non-secret values bound for this runtime×agent.
+app.get('/api/runtimes/:id/agents/:key/skills', async (req, res) => {
+  const runtime = await loadRuntime(req.params.id)
+  if (!runtime) return res.status(404).json({ error: 'not found' })
+  const agent = runtime.agents.find((a) => a.key === req.params.key)
+  if (!agent) return res.status(404).json({ error: 'agent not found' })
+  if (agent.source !== 'own' || !agent.miniappId) return res.json({ skills: [] })
+  const record = await loadRecord(agent.miniappId)
+  if (!record) return res.status(404).json({ error: 'miniapp not found' })
+  const ctx: SkillBindingContext = { record, runtimeId: runtime.id, agentKey: agent.key }
+  const skills = await Promise.all((record.skills ?? [])
+    .filter((s) => s.status === 'active' && declaredSettings(s).length)
+    .map(async (s) => {
+      const resolved = await resolveSkillSettings(ctx, s)
+      const filled = new Set(await settingsFilled(ctx, s))
+      return {
+        id: s.id,
+        name: s.name,
+        category: s.category,
+        bindingKey: skillBindingKey(s),
+        settings: declaredSettings(s).map((f) => ({
+          key: f.key,
+          label: f.label,
+          type: f.type ?? 'text',
+          options: f.options,
+          required: f.required,
+          secret: !!f.secret,
+          placeholder: f.placeholder,
+          filled: filled.has(f.key),
+          // Echo non-secret values only so the form can prefill.
+          value: f.secret ? undefined : resolved.credentials[f.key],
+        })),
+      }
+    }))
+  res.json({ skills })
+})
+
+// Set a skill's settings for ONE agent in ONE runtime. Secret values land in the
+// runtime's per-agent secrets file; non-secret values are stored on the runtime
+// record binding. Neither touches the shared agent, so other runtimes/users keep
+// their own configuration.
+app.post('/api/runtimes/:id/agents/:key/skills/:skillId/credentials', async (req, res) => {
+  const runtime = await loadRuntime(req.params.id)
+  if (!runtime) return res.status(404).json({ error: 'not found' })
+  const agent = runtime.agents.find((a) => a.key === req.params.key)
+  if (!agent) return res.status(404).json({ error: 'agent not found' })
+  if (agent.source !== 'own' || !agent.miniappId) return res.status(400).json({ error: 'agent has no configurable skills' })
+  const record = await loadRecord(agent.miniappId)
+  if (!record) return res.status(404).json({ error: 'miniapp not found' })
+  const skill = (record.skills ?? []).find((s) => s.id === req.params.skillId)
+  if (!skill) return res.status(404).json({ error: 'unknown skill' })
+  if (!declaredSettings(skill).length) return res.status(400).json({ error: 'skill has no settings' })
+
+  const values = (req.body?.values ?? {}) as Record<string, unknown>
+  const ctx: SkillBindingContext = { record, runtimeId: runtime.id, agentKey: agent.key }
+  const result = await writeSkillSettings(ctx, skill, values)
+
+  // Persist the non-secret binding + filled flags on the runtime record.
+  const key = skillBindingKey(skill)
+  const bindings = agent.bindings ?? (agent.bindings = {})
+  const skills = bindings.skills ?? (bindings.skills = {})
+  const prev = skills[key]?.config ?? {}
+  skills[key] = { config: { ...prev, ...result.config }, secretsFilled: result.secretsFilled }
+  await saveRuntime(runtime)
+
+  res.json({ ok: true, agentKey: agent.key, skillId: skill.id, secretsFilled: await settingsFilled(ctx, skill), values: result.publicValues })
+})
+
+app.delete('/api/runtimes/:id/agents/:key', async (req, res) => {
+  const runtime = await loadRuntime(req.params.id)
   if (!runtime) return res.status(404).json({ error: 'not found' })
   runtime.agents = runtime.agents.filter((a) => a.key !== req.params.key)
-  saveRuntime(runtime)
+  await saveRuntime(runtime)
   res.json({ runtime: publicRuntime(runtime) })
 })
 
-app.post('/api/runtimes/:id/bots', (req, res) => {
-  const runtime = loadRuntime(req.params.id)
+app.post('/api/runtimes/:id/bots', async (req, res) => {
+  const runtime = await loadRuntime(req.params.id)
   if (!runtime) return res.status(404).json({ error: 'not found' })
   const platform = String(req.body?.platform ?? '') as BotPlatform
   if (!BOT_LABELS[platform]) return res.status(400).json({ error: 'Unknown bot platform.' })
@@ -775,19 +853,31 @@ app.post('/api/runtimes/:id/bots', (req, res) => {
     ...(token ? { token } : {}),
   }
   runtime.bots.push(bot)
-  saveRuntime(runtime)
+  await saveRuntime(runtime)
   res.json({ runtime: publicRuntime(runtime) })
 })
 
-app.delete('/api/runtimes/:id/bots/:botId', (req, res) => {
-  const runtime = loadRuntime(req.params.id)
+app.delete('/api/runtimes/:id/bots/:botId', async (req, res) => {
+  const runtime = await loadRuntime(req.params.id)
   if (!runtime) return res.status(404).json({ error: 'not found' })
   runtime.bots = runtime.bots.filter((b) => b.id !== req.params.botId)
-  saveRuntime(runtime)
+  await saveRuntime(runtime)
   res.json({ runtime: publicRuntime(runtime) })
 })
 
-app.listen(config.port, () => {
-  console.log(`[terr-miniapp-3] backend on http://localhost:${config.port} (model: ${config.model})`)
-  startScheduler()
+// ── Serve the built SPA (production single-service: API + frontend, same origin) ──
+const frontendDist = process.env.FRONTEND_DIST || join(config.repoRoot, 'frontend', 'dist')
+app.use(express.static(frontendDist))
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) return next()
+  res.sendFile(join(frontendDist, 'index.html'))
 })
+
+async function start() {
+  await db.init()
+  app.listen(config.port, () => {
+    console.log(`[terr-miniapp-3] backend on http://localhost:${config.port} (model: ${config.model})`)
+    void startScheduler().catch((err) => console.error('[scheduler] failed to start', err))
+  })
+}
+void start()

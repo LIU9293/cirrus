@@ -1,4 +1,5 @@
 import type {
+  AuthUser,
   BotPlatform,
   CreationPhase,
   DeveloperChatMessage,
@@ -57,6 +58,38 @@ export interface LiveChatOutcome extends ActionOutcome {
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
   return res.json() as Promise<T>
+}
+
+/* ───────── Auth ───────── */
+
+export interface AuthInfo {
+  user: AuthUser | null
+  devAuth: boolean
+  googleAuth: boolean
+}
+
+export const googleLoginUrl = '/api/auth/google/start'
+
+export async function getAuth(): Promise<AuthInfo> {
+  const res = await fetch('/api/auth/me', { credentials: 'include' })
+  const body = (await res.json().catch(() => ({}))) as Partial<AuthInfo>
+  return { user: body.user ?? null, devAuth: !!body.devAuth, googleAuth: !!body.googleAuth }
+}
+
+export async function devLogin(email: string, name?: string): Promise<AuthUser> {
+  const data = await json<{ user: AuthUser }>(
+    await fetch('/api/auth/dev-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ email, name }),
+    }),
+  )
+  return data.user
+}
+
+export async function logout(): Promise<void> {
+  await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
 }
 
 export async function listMiniapps(): Promise<(MiniappRecord & { hasHtml: boolean })[]> {
@@ -446,6 +479,50 @@ export async function updateRuntimeAgentModelConfig(
     }),
   )
   return data.runtime
+}
+
+export interface RuntimeAgentSkillSetting {
+  key: string
+  label: string
+  type: string
+  options?: { label: string; value: string }[]
+  required?: boolean
+  secret: boolean
+  placeholder?: string
+  filled: boolean
+  value?: string
+}
+
+export interface RuntimeAgentSkillSettings {
+  id: string
+  name: string
+  category: string
+  bindingKey: string
+  settings: RuntimeAgentSkillSetting[]
+}
+
+/** The skills (with per-runtime settings status) an own-agent exposes in a runtime. */
+export async function getRuntimeAgentSkills(id: string, key: string): Promise<RuntimeAgentSkillSettings[]> {
+  const data = await json<{ skills: RuntimeAgentSkillSettings[] }>(
+    await fetch(`/api/runtimes/${id}/agents/${encodeURIComponent(key)}/skills`),
+  )
+  return data.skills
+}
+
+/** Bind a skill's settings/credentials for one agent in this runtime. */
+export async function saveRuntimeAgentSkillSettings(
+  id: string,
+  key: string,
+  skillId: string,
+  values: Record<string, string>,
+): Promise<{ ok: boolean; secretsFilled: string[]; values: Record<string, string> }> {
+  return json(
+    await fetch(`/api/runtimes/${id}/agents/${encodeURIComponent(key)}/skills/${skillId}/credentials`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values }),
+    }),
+  )
 }
 
 export async function connectRuntimeBot(id: string, platform: BotPlatform, token?: string): Promise<RuntimeRecord> {

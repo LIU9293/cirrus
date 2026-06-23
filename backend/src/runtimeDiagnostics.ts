@@ -80,10 +80,10 @@ function buildNetworkDiagnosticCode() {
 `.trim()
 }
 
-function getGmailCredentials(recordId: string): { email: string; appPassword: string } | { error: string } {
+async function getGmailCredentials(recordId: string): Promise<{ email: string; appPassword: string } | { error: string }> {
   let raw: string | null = null
   for (const path of ['secrets/gmail.json', 'secrets/Gmail.json']) {
-    raw = readAgentFile(recordId, path)
+    raw = await readAgentFile(recordId, path)
     if (raw) break
   }
   if (!raw) return { error: 'Gmail credentials are not configured for this agent.' }
@@ -255,10 +255,10 @@ export async function diagnoseRuntimeGmail(runtime: RuntimeRecord, requestedMini
     : runtime.agents.find((a) => a.source === 'own' && a.miniappId)
   const miniappId = requestedMiniappId || ownAgent?.miniappId || ''
   if (!miniappId) return { ok: false, runtimeId: runtime.id, sandboxId: sandbox.sandboxId, error: 'Runtime has no own miniapp agent to read Gmail credentials from.' }
-  const record = loadRecord(miniappId)
+  const record = await loadRecord(miniappId)
   if (!record) return { ok: false, runtimeId: runtime.id, sandboxId: sandbox.sandboxId, miniappId, error: 'Miniapp agent not found.' }
 
-  const creds = getGmailCredentials(record.id)
+  const creds = await getGmailCredentials(record.id)
   if ('error' in creds) return { ok: false, runtimeId: runtime.id, sandboxId: sandbox.sandboxId, miniappId: record.id, error: creds.error }
 
   const run = await runInRuntimeSandbox(sandbox.sandboxId, buildGmailImapDiagnosticCode(creds), { timeoutMs: 45_000 })

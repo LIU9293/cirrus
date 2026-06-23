@@ -133,20 +133,32 @@ export interface SkillToolCall {
   builtin?: string
 }
 
-/** One credential the user configures when adding a skill (e.g. an app password). */
-export interface SkillCredentialField {
+/**
+ * One configurable SETTING a skill declares. This is the *contract* (what the
+ * skill needs) — it travels with the skill/agent and is shareable. The actual
+ * *values* are bound per runtime×agent (see RuntimeAgentBindings), never baked
+ * into the shared agent. A credential is just a setting with `secret: true`:
+ * secret values are stored in a secrets file off the shared agent and never
+ * returned to the client/model; non-secret values ride in the runtime binding.
+ */
+export interface SkillSetting {
   /** Stable key, e.g. "app_password". */
   key: string
   label: string
-  /** Render hint for the credential form. */
-  type?: 'text' | 'password' | 'select' | 'textarea'
+  /** Render hint for the settings form. */
+  type?: 'text' | 'password' | 'select' | 'textarea' | 'number' | 'boolean'
   options?: { label: string; value: string }[]
   /** Defaults to true. Optional fields can be left blank without blocking readiness. */
   required?: boolean
   /** Masked in the UI, stored in secrets, never returned to client/model. */
   secret?: boolean
+  /** Non-secret default shipped with the skill (used until a binding overrides it). */
+  default?: unknown
   placeholder?: string
 }
+
+/** @deprecated Use SkillSetting — a credential is a setting with `secret: true`. */
+export type SkillCredentialField = SkillSetting
 
 /** Whether a skill ships with the platform or was built by the creator. */
 export type SkillKind = 'builtin' | 'custom'
@@ -251,8 +263,32 @@ export interface MiniappDraft {
   goal?: string
 }
 
+/** A signed-in user (Google-backed). Stored server-side. */
+export interface User {
+  id: string
+  /** Google's stable subject id; the unique key for matching on login. */
+  googleSub: string
+  email: string
+  name?: string
+  picture?: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** The safe subset of a user returned to the client. */
+export interface AuthUser {
+  id: string
+  email: string
+  name?: string
+  picture?: string
+}
+
 export interface MiniappRecord {
   id: string
+  /** The user who owns this agent. My-agents are private to their owner. */
+  ownerId: string
+  /** Reserved for future "publish to community"; defaults to private. */
+  visibility?: 'private' | 'public'
   manifest: MiniappManifest | null
   status: MiniappStatus
   /** Built single-file HTML (no bridge yet — the host injects it). */
@@ -360,6 +396,22 @@ export interface RuntimeAgentInstallation {
   logs?: string[]
 }
 
+/** Per-skill setting values bound for one agent inside one runtime. Non-secret
+ *  values live here (in the runtime record); secret values live in a secrets file
+ *  off the shared agent and only their keys are listed in `secretsFilled`. */
+export interface RuntimeAgentSkillBinding {
+  /** Non-secret setting values overriding the skill/agent defaults. */
+  config?: Record<string, unknown>
+  /** Which secret setting keys are filled (the values are stored on disk). */
+  secretsFilled?: string[]
+}
+
+/** All skill setting bindings for one agent in one runtime, keyed by the skill's
+ *  binding key (platformSkillId when built-in, else the skill instance id). */
+export interface RuntimeAgentBindings {
+  skills?: Record<string, RuntimeAgentSkillBinding>
+}
+
 export interface RuntimeAgentRef {
   key: string
   name: string
@@ -368,10 +420,15 @@ export interface RuntimeAgentRef {
   modelConfig?: RuntimeAgentModelConfig
   installation?: RuntimeAgentInstallation
   capabilities?: string[]
+  /** Per-runtime configuration: this agent's skill settings/credentials in THIS
+   *  runtime. Lets the same shared agent be configured differently per runtime. */
+  bindings?: RuntimeAgentBindings
 }
 
 export interface RuntimeRecord {
   id: string
+  /** The user who owns this runtime. Runtimes are private to their owner. */
+  ownerId: string
   name: string
   agents: RuntimeAgentRef[]
   status: RuntimeStatus

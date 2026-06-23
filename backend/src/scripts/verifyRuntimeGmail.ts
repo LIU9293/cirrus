@@ -1,4 +1,4 @@
-import { listRuntimes, loadRuntime } from '../runtimeStore.ts'
+import { listAllRuntimes, loadRuntime } from '../runtimeStore.ts'
 import { diagnoseRuntimeGmail, diagnoseRuntimeNetwork } from '../runtimeDiagnostics.ts'
 
 function arg(name: string): string {
@@ -6,17 +6,17 @@ function arg(name: string): string {
   return process.argv.find((item) => item.startsWith(flag))?.slice(flag.length) ?? ''
 }
 
-function pickRuntimeId() {
+async function pickRuntimeId(): Promise<string> {
   const explicit = process.argv[2]?.startsWith('--') ? '' : process.argv[2]
   if (explicit) return explicit
-  const withOwnAgent = listRuntimes().find((runtime) => runtime.sandboxKind === 'e2b' && runtime.sandboxId && runtime.agents.some((agent) => agent.source === 'own' && agent.miniappId))
+  const withOwnAgent = (await listAllRuntimes()).find((runtime) => runtime.sandboxKind === 'e2b' && runtime.sandboxId && runtime.agents.some((agent) => agent.source === 'own' && agent.miniappId))
   return withOwnAgent?.id ?? ''
 }
 
 async function main() {
-  const runtimeId = pickRuntimeId()
+  const runtimeId = await pickRuntimeId()
   if (!runtimeId) throw new Error('No E2B runtime with an own miniapp agent was found. Pass a runtime id as the first argument.')
-  const runtime = loadRuntime(runtimeId)
+  const runtime = await loadRuntime(runtimeId)
   if (!runtime) throw new Error(`Runtime not found: ${runtimeId}`)
   const miniappId = arg('miniapp') || arg('app')
 

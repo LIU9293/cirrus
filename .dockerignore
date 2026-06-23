@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+backend/data
+.git
+*.log
+.DS_Store
+designs
+*.pen
+docs
