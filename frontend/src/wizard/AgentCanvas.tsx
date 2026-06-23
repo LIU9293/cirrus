@@ -3284,7 +3284,14 @@ function RuntimeWindow({
     >
       <div
         className={cn('relative flex flex-col overflow-hidden rounded-[20px] border border-white/70 shadow-[0_26px_64px_-14px_rgba(25,25,23,0.36)]', (max || compactWindow) && 'h-full')}
-        style={{ ...(max || compactWindow ? {} : { height: size.h }), background: 'rgba(255,255,255,0.82)', backdropFilter: 'blur(26px)', WebkitBackdropFilter: 'blur(26px)' }}
+        style={{
+          ...(max || compactWindow ? {} : { height: size.h }),
+          // When maximized the dim overlay sits behind the window, so keep it
+          // fully opaque to stop the dark bleeding through and graying the UI.
+          ...(max
+            ? { background: 'var(--surface)' }
+            : { background: 'rgba(255,255,255,0.82)', backdropFilter: 'blur(26px)', WebkitBackdropFilter: 'blur(26px)' }),
+        }}
       >
         {/* Title bar — drag anywhere (windowed mode) */}
         <div
