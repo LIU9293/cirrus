@@ -10,7 +10,8 @@ import { runInboxTriage } from '../apps/inboxTriage.ts'
 import { fetchGmailLive, modifyGmailLive, type GmailModifyInput, type GmailSearchInput } from '../apps/gmailFetch.ts'
 import { findPlatformSkill } from '../skills/library.ts'
 import { resolveSkillSettings, type ResolvedSkillSettings, type SkillBindingContext } from '../skills/settings.ts'
-import { isPlainObject, type MiniappRecord, type MiniappSkill, type SkillToolCall } from '../../../shared/protocol.ts'
+import { makeCronTools } from './cronTools.ts'
+import { isPlainObject, type ChatChoice, type ChatImage, type MiniappRecord, type MiniappSkill, type SkillToolCall } from '../../../shared/protocol.ts'
 
 // Turns a miniapp's ACTIVE skills into tools the runtime agent can call, plus the
 // core patch_state tool. Every skill — built-in or custom — declares its tool calls
@@ -23,8 +24,20 @@ export type RuntimeToolActivity =
   | { kind: 'call'; name: string; summary: string }
   | { kind: 'result'; name: string; ok: boolean; detail?: string }
 
+/** Out-of-band UI the agent produced this turn (ask_user buttons, send_image
+ *  attachments). The tools mutate this; the chat layer lifts it onto the
+ *  assistant message and streams it to the client. */
+export interface RuntimeMessageUi {
+  choices?: ChatChoice[]
+  allowFreeText?: boolean
+  /** ask_user question, used as the message body when the agent emits no text. */
+  question?: string
+  images?: ChatImage[]
+}
+
 export interface RuntimeToolOptions {
   onActivity?: (activity: RuntimeToolActivity) => void
+  ui?: RuntimeMessageUi
 }
 
 function toolResult(payload: unknown, terminate = false) {
@@ -405,6 +418,66 @@ function patchStateTool(Type: Type, record: MiniappRecord): AgentTool {
 }
 
 const seq = 'sequential' as const
+
+/** ask_user: present a question + quick-reply buttons; ends the turn so the user
+ *  can respond. The chat layer renders the buttons and the click becomes the next
+ *  user message. */
+function askUserTool(Type: Type, opts: RuntimeToolOptions): AgentTool {
+  return {
+    name: 'ask_user',
+    label: 'Ask the user',
+    description:
+      'Ask the user a question and show a few quick-reply buttons. Use when you need them to choose between options or confirm. ' +
+      'options is a list of { label, value }: label is shown on the button; value is what the user "says" when they tap it (defaults to label). ' +
+      'Set allowFreeText=true if they may also type their own answer. After calling this, STOP — wait for the user to reply.',
+    parameters: Type.Object({
+      question: Type.String(),
+      options: Type.Array(Type.Object({ label: Type.String(), value: Type.Optional(Type.String()) })),
+      allowFreeText: Type.Optional(Type.Boolean()),
+    }),
+    execute: async (_id, rawArgs) => {
+      const args = rawArgs as any
+      const question = String(args?.question ?? '').trim()
+      const choices: ChatChoice[] = (Array.isArray(args?.options) ? args.options : [])
+        .map((o: any) => {
+          const label = String(o?.label ?? o?.value ?? '').trim()
+          return label ? { label, value: String(o?.value ?? label) } : null
+        })
+        .filter(Boolean) as ChatChoice[]
+      if (opts.ui) {
+        opts.ui.choices = choices
+        opts.ui.allowFreeText = Boolean(args?.allowFreeText)
+        if (question) opts.ui.question = question
+      }
+      return toolResult(
+        { ok: true, presented: { question, options: choices, allowFreeText: Boolean(args?.allowFreeText) }, note: 'Shown to the user. Stop and wait for their reply.' },
+        true,
+      )
+    },
+    executionMode: seq,
+  }
+}
+
+/** send_image: attach an image to the assistant's reply. */
+function sendImageTool(Type: Type, opts: RuntimeToolOptions): AgentTool {
+  return {
+    name: 'send_image',
+    label: 'Send an image',
+    description:
+      'Send an image to the user in the chat. Provide an http(s) image URL or a data:image/... URL, and optionally an alt/caption. ' +
+      'Call once per image; you may also write text in your reply.',
+    parameters: Type.Object({ url: Type.String(), alt: Type.Optional(Type.String()) }),
+    execute: async (_id, rawArgs) => {
+      const args = rawArgs as any
+      const url = String(args?.url ?? '').trim()
+      if (!/^(https?:\/\/|data:image\/)/i.test(url)) return toolResult({ ok: false, error: 'url must be an http(s) or data:image URL' })
+      const image: ChatImage = { url, alt: args?.alt ? String(args.alt) : undefined }
+      if (opts.ui) opts.ui.images = [...(opts.ui.images ?? []), image]
+      return toolResult({ ok: true, sent: image })
+    },
+    executionMode: seq,
+  }
+}
 
 /** Build the pi-agent tool for one built-in handler key, per the skill's tool spec. */
 function builtinTool(Type: Type, key: string, spec: SkillToolCall, skill: MiniappSkill, record: MiniappRecord, resolved: ResolvedSkillSettings): AgentTool | null {
@@ -950,7 +1023,12 @@ export async function makeRuntimeTools(
   const hasGmail = active.some((s) => s.platformSkillId === 'gmail') || (await listAgentTree(record.id)).tools.includes('gmail_fetch.ts')
   if (hasGmail) add(inboxTriageTool(Type, record))
 
-  return [patchStateTool(Type, record), ...out].map((tool) => withLog(tool, opts))
+  // Always-available runtime abilities: state, talking back to the user, images.
+  const base: AgentTool[] = [patchStateTool(Type, record), askUserTool(Type, opts), sendImageTool(Type, opts)]
+  // Inside a runtime, the agent can also manage its own scheduled tasks (cron).
+  if (ctx.runtimeId) base.push(...makeCronTools(Type, ctx.runtimeId))
+
+  return [...base, ...out].map((tool) => withLog(tool, opts))
 }
 
 /** Human-readable list of the skills the agent has, for the system prompt. */

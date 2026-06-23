@@ -1,10 +1,10 @@
-import type { AgentEvent as PiAgentEvent, AgentTool } from '@earendil-works/pi-agent-core'
+import type { AgentEvent as PiAgentEvent } from '@earendil-works/pi-agent-core'
 import type { AssistantMessage, Model, Usage } from '@earendil-works/pi-ai'
 import { config } from '../config.ts'
-import type { CronJob, RuntimeRecord } from '../../../shared/protocol.ts'
+import type { RuntimeRecord } from '../../../shared/protocol.ts'
 import type { AgentEvent, ChatTurn } from './developerAgent.ts'
-import { createCronJob, deleteCronJob, listCronJobs, updateCronJob } from '../cronStore.ts'
-import { isValidCron, nextCronRun } from '../cron.ts'
+import { listCronJobs } from '../cronStore.ts'
+import { makeCronTools } from './cronTools.ts'
 
 // A focused assistant that manages a runtime's scheduled tasks (cron jobs). It
 // only has cron CRUD tools — it does not run agents itself. The user chats with
@@ -50,23 +50,6 @@ function assistantText(message: AssistantMessage): string {
     .map((part) => part.text)
     .join('')
     .trim()
-}
-
-function toolResult(payload: unknown) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(payload) }], details: payload }
-}
-
-function jobSummary(job: CronJob) {
-  return {
-    id: job.id,
-    name: job.name,
-    schedule: job.schedule,
-    message: job.message,
-    targetAgentKey: job.targetAgentKey ?? null,
-    enabled: job.enabled,
-    nextRunAt: job.nextRunAt ?? null,
-    lastRunAt: job.lastRunAt ?? null,
-  }
 }
 
 async function buildSystemPrompt(runtime: RuntimeRecord): Promise<string> {
@@ -116,110 +99,17 @@ export async function runCronAssistant(
   const [{ Agent }, { Type }] = await Promise.all([import('@earendil-works/pi-agent-core'), import('@earendil-works/pi-ai')])
   const model = makeModel()
 
-  const validKeys = new Set(runtime.agents.map((a) => a.key))
-  const coerceTarget = (v: unknown): string | null => {
-    const key = typeof v === 'string' && v.trim() ? v.trim() : null
-    if (key && !validKeys.has(key)) throw new Error(`Unknown agent key "${key}". Valid keys: ${[...validKeys].join(', ') || '(none)'}`)
-    return key
-  }
-
-  const tools: AgentTool[] = [
-    {
-      name: 'list_cron_jobs',
-      label: 'List cron jobs',
-      description: 'List all cron jobs configured in this runtime, with their ids, schedules, targets, and enabled state.',
-      parameters: Type.Object({}),
-      execute: async () => {
-        emit({ type: 'tool_call', name: 'list_cron_jobs', summary: 'Listing cron jobs' })
-        const jobs = await listCronJobs(runtime.id)
-        emit({ type: 'tool_result', name: 'list_cron_jobs', ok: true })
-        return toolResult({ ok: true, jobs: jobs.map(jobSummary) })
-      },
-      executionMode: 'sequential',
+  // Reuse the shared cron tools, wrapping each to stream tool activity into the chat.
+  const tools = makeCronTools(Type, runtime.id).map((tool) => ({
+    ...tool,
+    execute: async (id: string, args: unknown) => {
+      emit({ type: 'tool_call', name: tool.name, summary: tool.label ?? tool.name })
+      const result = await tool.execute(id, args)
+      const ok = (result as { details?: { ok?: boolean } })?.details?.ok !== false
+      emit({ type: 'tool_result', name: tool.name, ok })
+      return result
     },
-    {
-      name: 'create_cron_job',
-      label: 'Create cron job',
-      description: 'Create a new scheduled task. Provide a short name, a 5-field cron schedule, the message to send to the agent, and optionally the target agent key.',
-      parameters: Type.Object({
-        name: Type.String(),
-        schedule: Type.String(),
-        message: Type.String(),
-        targetAgentKey: Type.Optional(Type.String()),
-      }),
-      execute: async (_id, rawArgs) => {
-        const args = rawArgs as any
-        emit({ type: 'tool_call', name: 'create_cron_job', summary: `Creating "${args?.name ?? ''}" (${args?.schedule ?? ''})` })
-        try {
-          if (!isValidCron(String(args?.schedule ?? ''))) throw new Error(`Invalid cron schedule "${args?.schedule}"`)
-          const job = await createCronJob({
-            runtimeId: runtime.id,
-            ownerId: runtime.ownerId,
-            name: String(args?.name ?? ''),
-            schedule: String(args?.schedule ?? ''),
-            message: String(args?.message ?? ''),
-            targetAgentKey: coerceTarget(args?.targetAgentKey),
-          })
-          emit({ type: 'tool_result', name: 'create_cron_job', ok: true })
-          return toolResult({ ok: true, job: jobSummary(job) })
-        } catch (err) {
-          const message = String((err as Error)?.message ?? err)
-          emit({ type: 'tool_result', name: 'create_cron_job', ok: false, detail: message })
-          return toolResult({ ok: false, error: message })
-        }
-      },
-      executionMode: 'sequential',
-    },
-    {
-      name: 'update_cron_job',
-      label: 'Update cron job',
-      description: 'Update an existing cron job by id. Only include the fields you want to change. Use enabled=false to pause a job.',
-      parameters: Type.Object({
-        id: Type.String(),
-        name: Type.Optional(Type.String()),
-        schedule: Type.Optional(Type.String()),
-        message: Type.Optional(Type.String()),
-        targetAgentKey: Type.Optional(Type.String()),
-        enabled: Type.Optional(Type.Boolean()),
-      }),
-      execute: async (_id, rawArgs) => {
-        const args = rawArgs as any
-        emit({ type: 'tool_call', name: 'update_cron_job', summary: `Updating ${args?.id ?? ''}` })
-        try {
-          if (args?.schedule !== undefined && !isValidCron(String(args.schedule))) throw new Error(`Invalid cron schedule "${args.schedule}"`)
-          const job = await updateCronJob(String(args?.id ?? ''), {
-            name: args?.name !== undefined ? String(args.name) : undefined,
-            schedule: args?.schedule !== undefined ? String(args.schedule) : undefined,
-            message: args?.message !== undefined ? String(args.message) : undefined,
-            targetAgentKey: args?.targetAgentKey !== undefined ? coerceTarget(args.targetAgentKey) : undefined,
-            enabled: args?.enabled !== undefined ? Boolean(args.enabled) : undefined,
-          })
-          if (!job) throw new Error(`No cron job with id "${args?.id}"`)
-          emit({ type: 'tool_result', name: 'update_cron_job', ok: true })
-          return toolResult({ ok: true, job: jobSummary(job) })
-        } catch (err) {
-          const message = String((err as Error)?.message ?? err)
-          emit({ type: 'tool_result', name: 'update_cron_job', ok: false, detail: message })
-          return toolResult({ ok: false, error: message })
-        }
-      },
-      executionMode: 'sequential',
-    },
-    {
-      name: 'delete_cron_job',
-      label: 'Delete cron job',
-      description: 'Delete a cron job permanently by id.',
-      parameters: Type.Object({ id: Type.String() }),
-      execute: async (_id, rawArgs) => {
-        const args = rawArgs as any
-        emit({ type: 'tool_call', name: 'delete_cron_job', summary: `Deleting ${args?.id ?? ''}` })
-        const ok = await deleteCronJob(String(args?.id ?? ''))
-        emit({ type: 'tool_result', name: 'delete_cron_job', ok })
-        return toolResult(ok ? { ok: true } : { ok: false, error: `No cron job with id "${args?.id}"` })
-      },
-      executionMode: 'sequential',
-    },
-  ]
+  }))
 
   const agent = new Agent({
     initialState: {

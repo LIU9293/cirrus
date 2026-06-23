@@ -1,6 +1,6 @@
 import { config } from '../config.ts'
 import { runInRuntimeSandbox } from '../sandbox/runtimeSandbox.ts'
-import { makeRuntimeTools, type RuntimeToolActivity } from './skillTools.ts'
+import { makeRuntimeTools, type RuntimeMessageUi, type RuntimeToolActivity } from './skillTools.ts'
 import type { ChatTurn } from './developerAgent.ts'
 import type { DeveloperChatActivity, MiniappRecord } from '../../../shared/protocol.ts'
 
@@ -19,6 +19,7 @@ export interface SandboxRuntimeAgentResult {
   ranInSandbox: boolean
   sandboxHost?: string
   error?: string
+  ui?: RuntimeMessageUi
 }
 
 type SandboxToolCall = {
@@ -178,7 +179,9 @@ export async function runRuntimeAgentLoopInSandbox(
   }
 
   const [{ Type }] = await Promise.all([import('@earendil-works/pi-ai')])
+  const ui: RuntimeMessageUi = {}
   const runtimeTools = await makeRuntimeTools(Type as any, record, { record, ...binding }, {
+    ui,
     onActivity: (activity) => {
       const mapped = mapActivity(activity)
       if (mapped) activities.push(mapped)
@@ -237,6 +240,7 @@ export async function runRuntimeAgentLoopInSandbox(
         activities,
         ranInSandbox: true,
         sandboxHost,
+        ui,
       }
     }
 
@@ -258,6 +262,19 @@ export async function runRuntimeAgentLoopInSandbox(
         })
       }
     }
+
+    // ask_user ends the turn so the user can reply (the sandbox loop doesn't
+    // honor the tool's terminate flag, so handle it explicitly).
+    if (ui.choices) {
+      return {
+        message: finalText || ui.question || '',
+        patched: record.stateVersion > before,
+        activities,
+        ranInSandbox: true,
+        sandboxHost,
+        ui,
+      }
+    }
   }
 
   return {
@@ -266,5 +283,6 @@ export async function runRuntimeAgentLoopInSandbox(
     activities,
     ranInSandbox: true,
     sandboxHost,
+    ui,
   }
 }

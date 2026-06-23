@@ -2,7 +2,7 @@ import type { AssistantMessage, Model, Usage } from '@earendil-works/pi-ai'
 import { config } from '../config.ts'
 import type { ActionSpec, DeveloperChatActivity, MiniappRecord } from '../../../shared/protocol.ts'
 import type { ChatTurn } from './developerAgent.ts'
-import { makeRuntimeTools, describeSkills } from './skillTools.ts'
+import { makeRuntimeTools, describeSkills, type RuntimeMessageUi } from './skillTools.ts'
 import { readSoul } from '../agentfs.ts'
 import { saveRecord } from '../store.ts'
 import { runInboxTriage } from '../apps/inboxTriage.ts'
@@ -75,6 +75,8 @@ export interface RuntimeActionOutcome {
 export interface RuntimeChatOutcome extends RuntimeActionOutcome {
   patched: boolean
   activities?: DeveloperChatActivity[]
+  /** Out-of-band UI the agent produced (ask_user buttons, send_image images). */
+  ui?: RuntimeMessageUi
 }
 
 /** Run a pi-agent tool loop with the record's skill tools. Returns the final
@@ -84,16 +86,18 @@ async function runAgent(
   system: string,
   history: ChatTurn[],
   binding?: RuntimeBinding,
-): Promise<{ message: string; patched: boolean; activities: DeveloperChatActivity[] }> {
+): Promise<{ message: string; patched: boolean; activities: DeveloperChatActivity[]; ui: RuntimeMessageUi }> {
   const activities: DeveloperChatActivity[] = []
+  const ui: RuntimeMessageUi = {}
   const userTurn = history.at(-1)
-  if (!userTurn || userTurn.role !== 'user') return { message: '', patched: false, activities }
+  if (!userTurn || userTurn.role !== 'user') return { message: '', patched: false, activities, ui }
 
   const [{ Agent }, { Type }] = await Promise.all([import('@earendil-works/pi-agent-core'), import('@earendil-works/pi-ai')])
   const model = makeModel()
   const before = record.stateVersion
 
   const tools = await makeRuntimeTools(Type, record, { record, ...binding }, {
+    ui,
     onActivity: (activity) => {
       if (activity.kind === 'call') activities.push({ kind: 'tool', text: activity.summary })
       else if (!activity.ok) activities.push({ kind: 'error', text: `${activity.name} failed${activity.detail ? `: ${activity.detail}` : ''}`, ok: false })
@@ -124,9 +128,9 @@ async function runAgent(
   try {
     await agent.prompt({ role: 'user', content: [{ type: 'text', text: userTurn.content }], timestamp: Date.now() })
   } catch (err) {
-    return { message: `Agent failed: ${String((err as Error)?.message ?? err)}`, patched: record.stateVersion > before, activities }
+    return { message: `Agent failed: ${String((err as Error)?.message ?? err)}`, patched: record.stateVersion > before, activities, ui }
   }
-  return { message: finalText, patched: record.stateVersion > before, activities }
+  return { message: finalText, patched: record.stateVersion > before, activities, ui }
 }
 
 function sandboxIdFromPayload(payload: unknown): string {
@@ -266,14 +270,17 @@ export async function runRuntimeChat(
     JSON.stringify(record.state ?? {}, null, 2),
   ].join('\n')
 
-  const { message, patched, activities } = opts.sandboxId
+  const { message, patched, activities, ui } = opts.sandboxId
     ? await runRuntimeAgentLoopInSandbox(record, opts.sandboxId, system, history, opts.binding)
     : await runAgent(record, system, history, opts.binding)
+  // If the agent only called ask_user (no prose), use its question as the body.
+  const body = message || ui?.question || (patched ? 'Updated.' : 'I can help with this app.')
   return {
     ok: true,
     patched,
-    message: message || (patched ? 'Updated.' : 'I can help with this app.'),
+    message: body,
     activities,
+    ui,
     state: record.state,
     stateVersion: record.stateVersion,
   }

@@ -1,5 +1,6 @@
 import type { ChatTurn } from './developerAgent.ts'
 import type { DeveloperChatMessage, MiniappRecord, RuntimeAgentRef, RuntimeRecord } from '../../../shared/protocol.ts'
+import type { RuntimeMessageUi } from './skillTools.ts'
 import { loadRecord } from '../store.ts'
 import { saveRuntime } from '../runtimeStore.ts'
 import { installCommunityAgentInSandbox, normalizeRuntimeAgentRef } from '../communityAgents.ts'
@@ -57,6 +58,8 @@ export interface RuntimeTurnResult {
   message: string
   activities: Activities
   durationMs: number
+  /** ask_user buttons / send_image attachments the agent produced this turn. */
+  ui?: RuntimeMessageUi
 }
 
 export interface RuntimeTurnOptions {
@@ -113,6 +116,7 @@ export async function executeRuntimeTurn(
 
   let message: string
   let activities: Activities = []
+  let ui: RuntimeMessageUi | undefined
   if (selectedRecord) {
     const outcome = await runCirrusRuntimeChat(selectedRecord, history, {
       sandboxId,
@@ -123,6 +127,7 @@ export async function executeRuntimeTurn(
     })
     message = outcome.message
     activities = outcome.activities ?? []
+    ui = outcome.ui
   } else if (selectedAgent?.source === 'community') {
     const outcome = await runCirrusRuntimeCommunityChat(selectedAgent, history, { sandboxId, routing, agentSpecs, route })
     message = outcome.message
@@ -148,9 +153,17 @@ export async function executeRuntimeTurn(
     if (userTurn?.role === 'user') {
       runtime.messages.push({ id: `${pre}m-` + now.toString(36), role: 'user', content: userTurn.content })
     }
-    runtime.messages.push({ id: `${pre}a-` + now.toString(36), role: 'assistant', content: message, durationMs, activities })
+    runtime.messages.push({
+      id: `${pre}a-` + now.toString(36),
+      role: 'assistant',
+      content: message,
+      durationMs,
+      activities,
+      ...(ui?.choices?.length ? { choices: ui.choices, allowFreeText: ui.allowFreeText } : {}),
+      ...(ui?.images?.length ? { images: ui.images } : {}),
+    })
     await saveRuntime(runtime)
   }
 
-  return { runtime, message, activities, durationMs }
+  return { runtime, message, activities, durationMs, ui }
 }

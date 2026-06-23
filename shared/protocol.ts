@@ -89,6 +89,19 @@ export interface DeveloperChatActivity {
   ok?: boolean
 }
 
+/** A button an agent offers the user via ask_user. `value` is sent back as the
+ *  user's reply when clicked; `label` is shown. */
+export interface ChatChoice {
+  label: string
+  value: string
+}
+
+/** An image an agent sends to the user via send_image. */
+export interface ChatImage {
+  url: string
+  alt?: string
+}
+
 export interface DeveloperChatMessage {
   id: string
   role: 'user' | 'assistant'
@@ -101,6 +114,12 @@ export interface DeveloperChatMessage {
     imageUrl?: string
     label: string
   }
+  /** ask_user: buttons offered to the user. */
+  choices?: ChatChoice[]
+  /** ask_user: whether the user may also type a free-text answer. */
+  allowFreeText?: boolean
+  /** send_image: images the agent attached to this message. */
+  images?: ChatImage[]
 }
 
 /**

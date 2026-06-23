@@ -25,6 +25,8 @@ export type AgentEvent =
   | { type: 'canvas_screenshot_request'; requestId: string }
   | { type: 'build'; ok: boolean; error?: string }
   | { type: 'record'; record: MiniappRecord }
+  | { type: 'choices'; choices: { label: string; value: string }[]; allowFreeText?: boolean }
+  | { type: 'image'; url: string; alt?: string }
   | { type: 'done'; durationMs?: number }
   | { type: 'error'; message: string }
 

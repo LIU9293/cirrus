@@ -4508,6 +4508,10 @@ function applyBuildChatEvent(messages: UiMessage[], assistantId: string, ev: Age
         return { ...m, activities }
       case 'assistant':
         return { ...m, content: `${m.content ?? ''}${ev.text}` }
+      case 'image':
+        return { ...m, images: [...(m.images ?? []), { url: ev.url, alt: ev.alt }] }
+      case 'choices':
+        return { ...m, choices: ev.choices, allowFreeText: ev.allowFreeText }
       case 'done':
         return { ...m, durationMs: ev.durationMs }
       case 'error':
@@ -4611,7 +4615,13 @@ function BuildChat({
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
         {messages.length === 0 && <div className="text-[12.5px] leading-relaxed text-ink-tertiary">{empty}</div>}
         {messages.map((m, i) => (
-          <BuildMsg key={m.id} m={m} working={building && i === messages.length - 1} />
+          <BuildMsg
+            key={m.id}
+            m={m}
+            working={building && i === messages.length - 1}
+            isLast={i === messages.length - 1}
+            onChoice={onSend}
+          />
         ))}
         {building && (
           <div className="flex items-center gap-2 text-xs text-ink-tertiary">
@@ -4702,7 +4712,7 @@ function formatWorkedDuration(ms?: number) {
   return `${seconds}s`
 }
 
-function BuildMsg({ m, working = false }: { m: UiMessage; working?: boolean }) {
+function BuildMsg({ m, working = false, isLast = false, onChoice }: { m: UiMessage; working?: boolean; isLast?: boolean; onChoice?: (text: string) => void }) {
   const [expanded, setExpanded] = useState(false)
   if (m.role === 'user') {
     return (
@@ -4741,6 +4751,33 @@ function BuildMsg({ m, working = false }: { m: UiMessage; working?: boolean }) {
             >
               <MessageResponse>{m.content}</MessageResponse>
             </ErrorBoundary>
+          </div>
+        )}
+        {/* send_image: image attachments */}
+        {m.images && m.images.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {m.images.map((img, i) => (
+              <a key={i} href={img.url} target="_blank" rel="noreferrer" className="block max-w-[240px] overflow-hidden rounded-[12px] border border-border">
+                <img src={img.url} alt={img.alt ?? ''} className="block max-h-[240px] w-full object-cover" />
+                {img.alt && <div className="px-2 py-1 text-[11px] text-ink-tertiary">{img.alt}</div>}
+              </a>
+            ))}
+          </div>
+        )}
+        {/* ask_user: quick-reply buttons (only actionable on the latest message) */}
+        {m.choices && m.choices.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {m.choices.map((c, i) => (
+              <button
+                key={i}
+                type="button"
+                disabled={!isLast || !onChoice}
+                onClick={() => onChoice?.(c.value)}
+                className="rounded-full border border-primary/30 bg-accent-soft px-3 py-1.5 text-[12.5px] font-medium text-accent-ink transition hover:bg-primary hover:text-primary-foreground disabled:cursor-default disabled:opacity-55 disabled:hover:bg-accent-soft disabled:hover:text-accent-ink"
+              >
+                {c.label}
+              </button>
+            ))}
           </div>
         )}
       </div>

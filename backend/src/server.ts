@@ -612,18 +612,20 @@ app.post('/api/runtimes/:id/chat', async (req, res) => {
   }
 
   const history = (req.body?.history ?? []) as ChatTurn[]
-  const { message, activities, durationMs } = await executeRuntimeTurn(runtime, history, { persist: true })
+  const { message, activities, durationMs, ui } = await executeRuntimeTurn(runtime, history, { persist: true })
 
   if (wantsStream) {
     for (const activity of activities) emit(activityToEvent(activity))
     for (const chunk of assistantChunks(message)) emit({ type: 'assistant', text: chunk })
+    for (const image of ui?.images ?? []) emit({ type: 'image', url: image.url, alt: image.alt })
+    if (ui?.choices?.length) emit({ type: 'choices', choices: ui.choices, allowFreeText: ui.allowFreeText })
     emit({ type: 'done', durationMs })
     res.write('data: [DONE]\n\n')
     res.end()
     return
   }
 
-  res.json({ ok: true, message, activities, durationMs })
+  res.json({ ok: true, message, activities, durationMs, choices: ui?.choices, allowFreeText: ui?.allowFreeText, images: ui?.images })
 })
 
 // ── Cron jobs: scheduled tasks that message a runtime agent on a schedule ──
