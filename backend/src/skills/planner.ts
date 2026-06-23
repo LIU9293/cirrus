@@ -125,7 +125,7 @@ function ensurePersistenceSkill(items: SkillPlanItem[], goal: string): SkillPlan
 
 export async function planSkills(goal: string, name?: string): Promise<SkillPlan> {
   const system = [
-    'You are the Terr skill planner. Given what a creator wants their miniapp to do,',
+    'You are the Cirrus skill planner. Given what a creator wants their miniapp to do,',
     'list the FEW skills (capabilities) it truly needs. Prefer the SMALLEST set — usually 2 to 4.',
     '',
     'CONSOLIDATE aggressively: group everything that talks to ONE external service into a SINGLE',

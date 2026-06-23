@@ -406,7 +406,7 @@ export async function chatAboutSkill(
     skill.platformSkillId === 'database'
       ? [
           'Database skill design rule:',
-          'Each agent should define its database interface in this skill README using a fenced ```terr-db block.',
+          'Each agent should define its database interface in this skill README using a fenced ```cirrus-db block.',
           'The interface should list tables, fields, primary keys, and what each table is for.',
           'The runtime tool define_database_interface stores the same interface in skill.config.databaseInterface and creates/updates tables.',
           'Prefer generic DB tool calls: define_database_interface, transform_records, create_records, query_records, update_records, delete_records, upsert_records.',
@@ -441,7 +441,7 @@ export async function chatAboutSkill(
             type: 'object',
             properties: {
               description: { type: 'string', description: 'Replacement skill description, if it should change.' },
-              readme: { type: 'string', description: 'Replacement skill README/skill.md. For database skills, include the terr-db interface block here.' },
+              readme: { type: 'string', description: 'Replacement skill README/skill.md. For database skills, include the cirrus-db interface block here.' },
               addOrUpdateTools: {
                 type: 'array',
                 description: 'Tool calls to add or update by name. Include full name, description, parameters JSON schema, and builtin/entry when applicable.',

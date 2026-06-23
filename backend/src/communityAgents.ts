@@ -41,7 +41,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     capabilities: ['multi-agent coordination', 'workflow planning', 'handoff routing', 'status synthesis'],
     systemPrompt:
       'You are Hermes, a runtime coordination agent. Focus on decomposing requests, assigning work to available agents, and explaining orchestration decisions clearly.',
-    installNotes: ['Installed as a Terr platform LLM adapter. Native Hermes package support can replace this adapter later.'],
+    installNotes: ['Installed as a Cirrus platform LLM adapter. Native Hermes package support can replace this adapter later.'],
   },
   'community:OpenClaw': {
     key: 'community:OpenClaw',
@@ -54,7 +54,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     capabilities: ['browser task planning', 'website automation planning', 'DOM/action reasoning'],
     systemPrompt:
       'You are OpenClaw, a web automation agent. Help plan browser actions and explain safe website automation steps. Do not claim to click external sites unless a browser tool is explicitly connected.',
-    installNotes: ['Installed as a Terr platform LLM adapter. Browser-control tools will be wired as explicit capabilities later.'],
+    installNotes: ['Installed as a Cirrus platform LLM adapter. Browser-control tools will be wired as explicit capabilities later.'],
   },
   'community:Pi Agent': {
     key: 'community:Pi Agent',
@@ -67,7 +67,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     capabilities: ['tool calling patterns', 'agent loop design', 'structured reasoning'],
     systemPrompt:
       'You are Pi Agent, a compact tool-calling runtime agent. Emphasize structured tool contracts, minimal loops, and practical agent execution.',
-    installNotes: ['Installed as a Terr platform LLM adapter using the current platform model.'],
+    installNotes: ['Installed as a Cirrus platform LLM adapter using the current platform model.'],
   },
   'community:Claude Code': {
     key: 'community:Claude Code',
@@ -79,8 +79,8 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     defaultModelConfig: subscriptionSkeleton('claude_code'),
     capabilities: ['codebase reasoning', 'patch planning', 'terminal workflow guidance'],
     systemPrompt:
-      'You are Claude Code in a Terr runtime adapter. Help with software-engineering tasks, code navigation, patch plans, and terminal-oriented workflows. Mention when native subscription auth is not connected.',
-    installNotes: ['Native Claude Code subscription auth is a skeleton; current adapter uses the Terr platform model.'],
+      'You are Claude Code in a Cirrus runtime adapter. Help with software-engineering tasks, code navigation, patch plans, and terminal-oriented workflows. Mention when native subscription auth is not connected.',
+    installNotes: ['Native Claude Code subscription auth is a skeleton; current adapter uses the Cirrus platform model.'],
   },
   'community:Codex': {
     key: 'community:Codex',
@@ -92,8 +92,8 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     defaultModelConfig: subscriptionSkeleton('codex'),
     capabilities: ['software engineering', 'repo inspection', 'implementation planning', 'test strategy'],
     systemPrompt:
-      'You are Codex in a Terr runtime adapter. Act as a pragmatic software-engineering agent. Mention when native Codex login/subscription auth is not connected.',
-    installNotes: ['Native Codex subscription auth is a skeleton; current adapter uses the Terr platform model.'],
+      'You are Codex in a Cirrus runtime adapter. Act as a pragmatic software-engineering agent. Mention when native Codex login/subscription auth is not connected.',
+    installNotes: ['Native Codex subscription auth is a skeleton; current adapter uses the Cirrus platform model.'],
   },
   'community:OpenCode': {
     key: 'community:OpenCode',
@@ -105,8 +105,8 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     defaultModelConfig: subscriptionSkeleton('opencode'),
     capabilities: ['coding workflows', 'CLI-oriented engineering guidance', 'open-source agent operations'],
     systemPrompt:
-      'You are OpenCode in a Terr runtime adapter. Help with coding tasks and CLI-oriented development. Mention when native OpenCode auth/install is not connected.',
-    installNotes: ['Native OpenCode install/auth is a skeleton; current adapter uses the Terr platform model.'],
+      'You are OpenCode in a Cirrus runtime adapter. Help with coding tasks and CLI-oriented development. Mention when native OpenCode auth/install is not connected.',
+    installNotes: ['Native OpenCode install/auth is a skeleton; current adapter uses the Cirrus platform model.'],
   },
 }
 
@@ -130,7 +130,7 @@ export function normalizeRuntimeAgentRef(agent: RuntimeAgentRef): RuntimeAgentRe
       agent.installation ??
       (agent.source === 'community'
         ? { status: 'not_installed', adapter: definition?.adapter ?? 'unknown', version: definition?.version }
-        : { status: 'ready', adapter: 'terr-own-agent', version: '0.1.0' }),
+        : { status: 'ready', adapter: 'cirrus-own-agent', version: '0.1.0' }),
   }
 }
 
@@ -147,8 +147,8 @@ export async function invoke(payload) {
     agent.systemPrompt,
     coding ? [
       'You are a coding agent running inside this runtime sandbox.',
-      'The runtime filesystem is isolated to this E2B sandbox. Use /home/user/terr/workspace as the default workspace for repositories.',
-      'You have full coding tools for files and shell commands under /home/user/terr.',
+      'The runtime filesystem is isolated to this E2B sandbox. Use /home/user/cirrus/workspace as the default workspace for repositories.',
+      'You have full coding tools for files and shell commands under /home/user/cirrus.',
       'Use read_file/write_file/list_dir/run_command to inspect, edit, run tests, use git, push branches, and verify work.',
       'Do not only describe commands when the user asked you to make a change; execute the work inside the sandbox.',
     ].join('\\n') : '',
@@ -187,10 +187,10 @@ export async function invoke(payload) {
 function codingTools() {
   const obj = (properties) => ({ type: 'object', properties });
   return [
-    { type: 'function', function: { name: 'list_dir', description: 'List files under /home/user/terr. Use /home/user/terr/workspace for repository workspaces.', parameters: obj({ path: { type: 'string' } }) } },
-    { type: 'function', function: { name: 'read_file', description: 'Read a UTF-8 text file under /home/user/terr.', parameters: obj({ path: { type: 'string' } }) } },
-    { type: 'function', function: { name: 'write_file', description: 'Write a UTF-8 text file under /home/user/terr, creating parent directories.', parameters: obj({ path: { type: 'string' }, content: { type: 'string' } }) } },
-    { type: 'function', function: { name: 'run_command', description: 'Run a shell command inside /home/user/terr or a subdirectory. Use this for development commands, git operations, tests, builds, and verification.', parameters: obj({ command: { type: 'string' }, cwd: { type: 'string' } }) } },
+    { type: 'function', function: { name: 'list_dir', description: 'List files under /home/user/cirrus. Use /home/user/cirrus/workspace for repository workspaces.', parameters: obj({ path: { type: 'string' } }) } },
+    { type: 'function', function: { name: 'read_file', description: 'Read a UTF-8 text file under /home/user/cirrus.', parameters: obj({ path: { type: 'string' } }) } },
+    { type: 'function', function: { name: 'write_file', description: 'Write a UTF-8 text file under /home/user/cirrus, creating parent directories.', parameters: obj({ path: { type: 'string' }, content: { type: 'string' } }) } },
+    { type: 'function', function: { name: 'run_command', description: 'Run a shell command inside /home/user/cirrus or a subdirectory. Use this for development commands, git operations, tests, builds, and verification.', parameters: obj({ command: { type: 'string' }, cwd: { type: 'string' } }) } },
   ];
 }
 
@@ -199,10 +199,10 @@ async function runTool(name, rawArgs) {
   const path = await import('node:path');
   const cp = await import('node:child_process');
   const args = rawArgs ? JSON.parse(rawArgs) : {};
-  const root = '/home/user/terr';
+  const root = '/home/user/cirrus';
   const safe = (input = '.') => {
-    const abs = path.resolve(root, String(input || '.').replace(/^\\/home\\/user\\/terr\\/?/, ''));
-    if (abs !== root && !abs.startsWith(root + path.sep)) throw new Error('Path escapes /home/user/terr');
+    const abs = path.resolve(root, String(input || '.').replace(/^\\/home\\/user\\/cirrus\\/?/, ''));
+    if (abs !== root && !abs.startsWith(root + path.sep)) throw new Error('Path escapes /home/user/cirrus');
     return abs;
   };
   try {
@@ -234,7 +234,7 @@ async function runTool(name, rawArgs) {
           env: {
             ...process.env,
             HOME: '/home/user',
-            PATH: ['/home/user/terr/bin', process.env.PATH || '/usr/local/bin:/usr/bin:/bin'].join(':'),
+            PATH: ['/home/user/cirrus/bin', process.env.PATH || '/usr/local/bin:/usr/bin:/bin'].join(':'),
           },
         }, (error, stdout, stderr) => {
           resolve({ ok: !error, cwd, command, stdout: String(stdout || '').slice(0, 30000), stderr: String(stderr || '').slice(0, 12000), error: error ? String(error.message || error) : undefined });
@@ -250,7 +250,7 @@ async function runTool(name, rawArgs) {
 }
 
 function installCode(definition: CommunityAgentDefinition): string {
-  const dir = `/home/user/terr/agents/${agentDirName(definition.key)}`
+  const dir = `/home/user/cirrus/agents/${agentDirName(definition.key)}`
   const manifest = {
     key: definition.key,
     name: definition.name,
@@ -275,7 +275,7 @@ function installCode(definition: CommunityAgentDefinition): string {
 }
 
 function invokeCode(definition: CommunityAgentDefinition, history: ChatTurn[]): string {
-  const dir = `/home/user/terr/agents/${agentDirName(definition.key)}`
+  const dir = `/home/user/cirrus/agents/${agentDirName(definition.key)}`
   const endpoint = config.baseURL.replace(/\/$/, '') + '/chat/completions'
   const payload = {
     model: {
@@ -292,7 +292,7 @@ function invokeCode(definition: CommunityAgentDefinition, history: ChatTurn[]): 
         '',
         `Installed adapter: ${definition.adapter} ${definition.version}.`,
         'Model mode: platform. Custom LLM API and subscription authorization configs are available in the runtime schema but not active in this adapter yet.',
-        'If asked where you run, say you are invoked through your installed Terr community-agent adapter inside the runtime E2B sandbox.',
+        'If asked where you run, say you are invoked through your installed Cirrus community-agent adapter inside the runtime E2B sandbox.',
       ].join('\n'),
     },
     history,

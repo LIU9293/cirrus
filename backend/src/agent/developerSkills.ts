@@ -108,7 +108,7 @@ export const DEVELOPER_AGENT_SKILLS: Record<DeveloperAgentSkillId, DeveloperAgen
 export function developerSkillPrompt(id: DeveloperAgentSkillId, scopedPrompt?: string): string {
   const skill = DEVELOPER_AGENT_SKILLS[id]
   return [
-    'You are the Terr Developer Agent.',
+    'You are the Cirrus Developer Agent.',
     'You are one unified creator-side agent. Different Studio panels activate different Developer Agent skills and scoped context.',
     `Active Developer Agent skill: ${skill.name}.`,
     `Skill purpose: ${skill.purpose}`,

@@ -2,7 +2,7 @@ import { Type } from '@earendil-works/pi-ai'
 import { loadRecord } from '../store.ts'
 import { makeRuntimeTools } from '../agent/skillTools.ts'
 import { getDatastoreDriver } from '../datastore/index.ts'
-import { runTerrRuntimeAction } from '../agent/terrRuntimeAgent.ts'
+import { runCirrusRuntimeAction } from '../agent/cirrusRuntimeAgent.ts'
 
 async function main() {
   const appId = process.argv[2] || 'app-l99jrh-2cfn'
@@ -21,7 +21,7 @@ async function main() {
   const gmailStatus = await call('gmail_connection_status')
   const action = record.manifest?.actions.find((item) => item.id === 'run_gmail_digest')
   const actionOutcome = action
-    ? await runTerrRuntimeAction(record, action, { source: 'verify:gmail-digest' })
+    ? await runCirrusRuntimeAction(record, action, { source: 'verify:gmail-digest' })
     : { ok: false, message: 'run_gmail_digest action is not declared.', state: record.state, stateVersion: record.stateVersion }
   const ds = getDatastoreDriver()
   const tables = await ds.listTables(record.id)

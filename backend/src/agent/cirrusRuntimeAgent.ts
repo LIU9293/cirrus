@@ -9,10 +9,10 @@ import {
   type RuntimeChatOutcome,
 } from './runtimeAgent.ts'
 
-export type TerrRuntimeActionOutcome = RuntimeActionOutcome
-export type TerrRuntimeChatOutcome = RuntimeChatOutcome
+export type CirrusRuntimeActionOutcome = RuntimeActionOutcome
+export type CirrusRuntimeChatOutcome = RuntimeChatOutcome
 
-export interface TerrRuntimeAgentSpec {
+export interface CirrusRuntimeAgentSpec {
   id: string
   key: string
   name: string
@@ -27,20 +27,20 @@ export interface TerrRuntimeAgentSpec {
   actions?: string[]
 }
 
-export interface TerrRuntimeRoutingDecision {
+export interface CirrusRuntimeRoutingDecision {
   mode: 'direct' | 'orchestrated'
   reason: string
   targetAgentId?: string
 }
 
-export interface TerrRuntimeRoute {
+export interface CirrusRuntimeRoute {
   target: 'agent' | 'runtime'
   targetAgentKey?: string
   targetAgentName?: string
   reason: string
 }
 
-export function describeTerrRuntimeAgentSpecs(records: MiniappRecord[]): TerrRuntimeAgentSpec[] {
+export function describeCirrusRuntimeAgentSpecs(records: MiniappRecord[]): CirrusRuntimeAgentSpec[] {
   return records.map((record) => ({
     id: record.id,
     key: `own:${record.id}`,
@@ -57,7 +57,7 @@ export function describeTerrRuntimeAgentSpecs(records: MiniappRecord[]): TerrRun
   }))
 }
 
-function describeOwnAgentSpec(agent: RuntimeAgentRef, record: MiniappRecord): TerrRuntimeAgentSpec {
+function describeOwnAgentSpec(agent: RuntimeAgentRef, record: MiniappRecord): CirrusRuntimeAgentSpec {
   return {
     id: record.id,
     key: agent.key,
@@ -74,7 +74,7 @@ function describeOwnAgentSpec(agent: RuntimeAgentRef, record: MiniappRecord): Te
   }
 }
 
-function describeCommunityAgentSpec(agent: RuntimeAgentRef): TerrRuntimeAgentSpec {
+function describeCommunityAgentSpec(agent: RuntimeAgentRef): CirrusRuntimeAgentSpec {
   return {
     id: agent.key,
     key: agent.key,
@@ -86,10 +86,10 @@ function describeCommunityAgentSpec(agent: RuntimeAgentRef): TerrRuntimeAgentSpe
   }
 }
 
-export function describeTerrRuntimeAgentSpecsForRuntime(
+export function describeCirrusRuntimeAgentSpecsForRuntime(
   agents: RuntimeAgentRef[],
   recordsByMiniappId: Map<string, MiniappRecord>,
-): TerrRuntimeAgentSpec[] {
+): CirrusRuntimeAgentSpec[] {
   return agents.map((agent) => {
     if (agent.source === 'own' && agent.miniappId) {
       const record = recordsByMiniappId.get(agent.miniappId)
@@ -99,16 +99,16 @@ export function describeTerrRuntimeAgentSpecsForRuntime(
   })
 }
 
-export function decideTerrRuntimeRouting(agentCount: number): TerrRuntimeRoutingDecision {
+export function decideCirrusRuntimeRouting(agentCount: number): CirrusRuntimeRoutingDecision {
   if (agentCount <= 1) {
     return {
       mode: 'direct',
-      reason: 'Runtime has one agent, so TerrRuntimeAgent uses deterministic direct handoff without an LLM routing step.',
+      reason: 'Runtime has one agent, so CirrusRuntimeAgent uses deterministic direct handoff without an LLM routing step.',
     }
   }
   return {
     mode: 'orchestrated',
-    reason: 'Runtime has multiple agents, so TerrRuntimeAgent should route or coordinate before handing off.',
+    reason: 'Runtime has multiple agents, so CirrusRuntimeAgent should route or coordinate before handing off.',
   }
 }
 
@@ -116,7 +116,7 @@ function lastUserMessage(history: ChatTurn[]): string {
   return [...history].reverse().find((turn) => turn.role === 'user')?.content ?? ''
 }
 
-function searchableSpecText(spec: TerrRuntimeAgentSpec): string {
+function searchableSpecText(spec: CirrusRuntimeAgentSpec): string {
   return [
     spec.name,
     spec.source,
@@ -135,7 +135,7 @@ function tokens(value: string): string[] {
   return [...new Set(matches.filter((token) => !['this', 'that', 'with', 'from', 'into', '一下', '这个', '那个', '多少', '什么'].includes(token)))]
 }
 
-function routeScore(message: string, spec: TerrRuntimeAgentSpec): number {
+function routeScore(message: string, spec: CirrusRuntimeAgentSpec): number {
   const lower = message.toLowerCase()
   const text = searchableSpecText(spec)
   let score = 0
@@ -159,7 +159,7 @@ function normalizeMention(value: string): string {
     .replace(/[^a-z0-9\u4e00-\u9fff]+/g, '')
 }
 
-function mentionedSpec(message: string, specs: TerrRuntimeAgentSpec[]): TerrRuntimeAgentSpec | null {
+function mentionedSpec(message: string, specs: CirrusRuntimeAgentSpec[]): CirrusRuntimeAgentSpec | null {
   const mentions = [...message.matchAll(/@([^\s@]+(?:\s+[^\s@]+){0,4})/g)].map((match) => match[1] ?? '')
   if (!mentions.length) return null
   const candidates = specs
@@ -180,7 +180,7 @@ function mentionedSpec(message: string, specs: TerrRuntimeAgentSpec[]): TerrRunt
   return null
 }
 
-export function routeTerrRuntimeMessage(history: ChatTurn[], specs: TerrRuntimeAgentSpec[]): TerrRuntimeRoute {
+export function routeCirrusRuntimeMessage(history: ChatTurn[], specs: CirrusRuntimeAgentSpec[]): CirrusRuntimeRoute {
   if (specs.length === 0) {
     return { target: 'runtime', reason: 'No agent specs are attached to this runtime.' }
   }
@@ -196,7 +196,7 @@ export function routeTerrRuntimeMessage(history: ChatTurn[], specs: TerrRuntimeA
       target: 'agent',
       targetAgentKey: mentioned.key,
       targetAgentName: mentioned.name,
-      reason: `Shortcut mention matched @${mentioned.name}; TerrRuntimeAgent skipped scoring and handed off directly.`,
+      reason: `Shortcut mention matched @${mentioned.name}; CirrusRuntimeAgent skipped scoring and handed off directly.`,
     }
   }
 
@@ -208,7 +208,7 @@ export function routeTerrRuntimeMessage(history: ChatTurn[], specs: TerrRuntimeA
     return { target: 'runtime', reason: 'No agent specification matched the user request confidently.' }
   }
   if (second && second.score === best.score) {
-    return { target: 'runtime', reason: `Multiple agents matched equally (${best.spec.name}, ${second.spec.name}); TerrRuntimeAgent should clarify.` }
+    return { target: 'runtime', reason: `Multiple agents matched equally (${best.spec.name}, ${second.spec.name}); CirrusRuntimeAgent should clarify.` }
   }
   return {
     target: 'agent',
@@ -218,7 +218,7 @@ export function routeTerrRuntimeMessage(history: ChatTurn[], specs: TerrRuntimeA
   }
 }
 
-function terrRuntimeContext(routing?: TerrRuntimeRoutingDecision, specs?: TerrRuntimeAgentSpec[]): string {
+function cirrusRuntimeContext(routing?: CirrusRuntimeRoutingDecision, specs?: CirrusRuntimeAgentSpec[]): string {
   return [
     routing ? `Routing mode: ${routing.mode}. ${routing.reason}` : '',
     specs?.length
@@ -236,13 +236,13 @@ function terrRuntimeContext(routing?: TerrRuntimeRoutingDecision, specs?: TerrRu
           ),
         ].join('\n')
       : '',
-    'If there is exactly one target agent, hand off directly. If there are multiple agents, act as TerrRuntimeAgent: route or coordinate first, then answer through the selected agent context.',
+    'If there is exactly one target agent, hand off directly. If there are multiple agents, act as CirrusRuntimeAgent: route or coordinate first, then answer through the selected agent context.',
   ]
     .filter(Boolean)
     .join('\n')
 }
 
-function specsPrompt(specs: TerrRuntimeAgentSpec[]): string {
+function specsPrompt(specs: CirrusRuntimeAgentSpec[]): string {
   return specs
     .map((spec) =>
       [
@@ -259,43 +259,43 @@ function specsPrompt(specs: TerrRuntimeAgentSpec[]): string {
     .join('\n')
 }
 
-export async function runTerrRuntimeAction(
+export async function runCirrusRuntimeAction(
   record: MiniappRecord,
   action: ActionSpec,
   payload: unknown,
   binding?: { runtimeId?: string; agentKey?: string },
-): Promise<TerrRuntimeActionOutcome> {
+): Promise<CirrusRuntimeActionOutcome> {
   return runRuntimeAction(record, action, payload, binding)
 }
 
-export async function runTerrRuntimeChat(
+export async function runCirrusRuntimeChat(
   record: MiniappRecord,
   history: ChatTurn[],
-  opts: { sandboxId?: string | null; routing?: TerrRuntimeRoutingDecision; agentSpecs?: TerrRuntimeAgentSpec[]; route?: TerrRuntimeRoute; binding?: { runtimeId?: string; agentKey?: string } } = {},
-): Promise<TerrRuntimeChatOutcome> {
+  opts: { sandboxId?: string | null; routing?: CirrusRuntimeRoutingDecision; agentSpecs?: CirrusRuntimeAgentSpec[]; route?: CirrusRuntimeRoute; binding?: { runtimeId?: string; agentKey?: string } } = {},
+): Promise<CirrusRuntimeChatOutcome> {
   const activities: DeveloperChatActivity[] = []
-  if (opts.routing) activities.push({ kind: 'status', text: `TerrRuntimeAgent routing: ${opts.routing.mode}` })
-  if (opts.agentSpecs?.length) activities.push({ kind: 'status', text: `TerrRuntimeAgent sees ${opts.agentSpecs.length} agent spec${opts.agentSpecs.length === 1 ? '' : 's'}.` })
-  if (opts.route) activities.push({ kind: 'status', text: opts.route.targetAgentName ? `TerrRuntimeAgent selected: ${opts.route.targetAgentName}` : 'TerrRuntimeAgent handling coordination' })
+  if (opts.routing) activities.push({ kind: 'status', text: `CirrusRuntimeAgent routing: ${opts.routing.mode}` })
+  if (opts.agentSpecs?.length) activities.push({ kind: 'status', text: `CirrusRuntimeAgent sees ${opts.agentSpecs.length} agent spec${opts.agentSpecs.length === 1 ? '' : 's'}.` })
+  if (opts.route) activities.push({ kind: 'status', text: opts.route.targetAgentName ? `CirrusRuntimeAgent selected: ${opts.route.targetAgentName}` : 'CirrusRuntimeAgent handling coordination' })
   const outcome = await runRuntimeChat(record, history, {
     sandboxId: opts.sandboxId,
-    terrRuntimeContext: terrRuntimeContext(opts.routing, opts.agentSpecs),
+    cirrusRuntimeContext: cirrusRuntimeContext(opts.routing, opts.agentSpecs),
     binding: opts.binding,
   })
   return { ...outcome, activities: [...activities, ...(outcome.activities ?? [])] }
 }
 
-export async function runTerrRuntimeCoordinatorChat(
+export async function runCirrusRuntimeCoordinatorChat(
   history: ChatTurn[],
-  opts: { sandboxId?: string | null; routing: TerrRuntimeRoutingDecision; agentSpecs: TerrRuntimeAgentSpec[]; route: TerrRuntimeRoute },
-): Promise<TerrRuntimeChatOutcome> {
+  opts: { sandboxId?: string | null; routing: CirrusRuntimeRoutingDecision; agentSpecs: CirrusRuntimeAgentSpec[]; route: CirrusRuntimeRoute },
+): Promise<CirrusRuntimeChatOutcome> {
   const activities: DeveloperChatActivity[] = [
-    { kind: 'status', text: `TerrRuntimeAgent routing: ${opts.routing.mode}` },
-    { kind: 'status', text: `TerrRuntimeAgent sees ${opts.agentSpecs.length} agent spec${opts.agentSpecs.length === 1 ? '' : 's'}.` },
-    { kind: 'status', text: `TerrRuntimeAgent handling coordination: ${opts.route.reason}` },
+    { kind: 'status', text: `CirrusRuntimeAgent routing: ${opts.routing.mode}` },
+    { kind: 'status', text: `CirrusRuntimeAgent sees ${opts.agentSpecs.length} agent spec${opts.agentSpecs.length === 1 ? '' : 's'}.` },
+    { kind: 'status', text: `CirrusRuntimeAgent handling coordination: ${opts.route.reason}` },
   ]
   const system = [
-    'You are TerrRuntimeAgent, the runtime-level coordinator for a Terr runtime.',
+    'You are CirrusRuntimeAgent, the runtime-level coordinator for a Cirrus runtime.',
     'You receive the user message before runtime agents when routing is ambiguous.',
     'Use the visible agent specifications to decide whether to ask a concise clarifying question or explain which agents can help.',
     'Do not claim to have executed a target agent tool. Do not invent private data.',
@@ -312,7 +312,7 @@ export async function runTerrRuntimeCoordinatorChat(
     return {
       ok: true,
       patched: false,
-      message: 'This runtime needs a live E2B sandbox before TerrRuntimeAgent can coordinate this request.',
+      message: 'This runtime needs a live E2B sandbox before CirrusRuntimeAgent can coordinate this request.',
       activities,
       state: {},
       stateVersion: 0,
@@ -320,7 +320,7 @@ export async function runTerrRuntimeCoordinatorChat(
   }
   const out = await runAgentInSandbox(opts.sandboxId, system, history)
   if (!out.ok) {
-    const message = `TerrRuntimeAgent coordination failed: ${out.error ?? 'unknown error'}`
+    const message = `CirrusRuntimeAgent coordination failed: ${out.error ?? 'unknown error'}`
     return { ok: false, patched: false, message, activities: [...activities, { kind: 'error', text: message, ok: false }], state: {}, stateVersion: 0 }
   }
   return {
@@ -329,7 +329,7 @@ export async function runTerrRuntimeCoordinatorChat(
     message: out.reply || 'Which agent should handle this?',
     activities: [
       ...activities,
-      { kind: 'status', text: 'Running TerrRuntimeAgent coordinator inside E2B sandbox' },
+      { kind: 'status', text: 'Running CirrusRuntimeAgent coordinator inside E2B sandbox' },
       ...(out.sandboxHost ? [{ kind: 'status' as const, text: `Sandbox host: ${out.sandboxHost}` }] : []),
     ],
     state: {},
@@ -337,15 +337,15 @@ export async function runTerrRuntimeCoordinatorChat(
   }
 }
 
-export async function runTerrRuntimeCommunityChat(
+export async function runCirrusRuntimeCommunityChat(
   agent: RuntimeAgentRef,
   history: ChatTurn[],
-  opts: { sandboxId?: string | null; routing: TerrRuntimeRoutingDecision; agentSpecs: TerrRuntimeAgentSpec[]; route: TerrRuntimeRoute },
-): Promise<TerrRuntimeChatOutcome> {
+  opts: { sandboxId?: string | null; routing: CirrusRuntimeRoutingDecision; agentSpecs: CirrusRuntimeAgentSpec[]; route: CirrusRuntimeRoute },
+): Promise<CirrusRuntimeChatOutcome> {
   const activities: DeveloperChatActivity[] = [
-    { kind: 'status', text: `TerrRuntimeAgent routing: ${opts.routing.mode}` },
-    { kind: 'status', text: `TerrRuntimeAgent sees ${opts.agentSpecs.length} agent spec${opts.agentSpecs.length === 1 ? '' : 's'}.` },
-    { kind: 'status', text: `TerrRuntimeAgent selected: ${agent.name}` },
+    { kind: 'status', text: `CirrusRuntimeAgent routing: ${opts.routing.mode}` },
+    { kind: 'status', text: `CirrusRuntimeAgent sees ${opts.agentSpecs.length} agent spec${opts.agentSpecs.length === 1 ? '' : 's'}.` },
+    { kind: 'status', text: `CirrusRuntimeAgent selected: ${agent.name}` },
   ]
   if (!opts.sandboxId) {
     return {

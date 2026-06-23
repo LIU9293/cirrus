@@ -1,5 +1,5 @@
 {
-  "name": "terr-miniapp-runtime",
+  "name": "cirrus-runtime",
   "private": true,
   "version": "0.0.0",
   "type": "module",

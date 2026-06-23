@@ -5,7 +5,7 @@
 
 :root {
   --radius: 0.75rem;
-  /* Terr design palette (see design.pen) */
+  /* Cirrus design palette (see design.pen) */
   --background: #FAFAF9;
   --foreground: #191917;
   --card: #FFFFFF;
@@ -107,7 +107,7 @@
   }
 }
 
-/* ── Free-canvas dot grid (Terr agent creation) ── */
+/* ── Free-canvas dot grid (Cirrus agent creation) ── */
 .dot-bg {
   position: relative;
   background-color: var(--background);
@@ -123,41 +123,41 @@
   mask-image: radial-gradient(circle at 50% 46%, #000 0%, #000 26%, transparent 72%);
 }
 
-@keyframes terr-col-in {
+@keyframes cirrus-col-in {
   from { opacity: 0; transform: translateY(14px) scale(0.985); }
   to { opacity: 1; transform: none; }
 }
-@keyframes terr-fade-up {
+@keyframes cirrus-fade-up {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
 }
-@keyframes terr-pop {
+@keyframes cirrus-pop {
   0% { opacity: 0; transform: translateY(6px) scale(0.96); }
   100% { opacity: 1; transform: none; }
 }
-@keyframes terr-float {
+@keyframes cirrus-float {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-9px); }
 }
-.terr-float { animation: terr-float 4s ease-in-out infinite; }
-.terr-float-slow { animation: terr-float 6.5s ease-in-out infinite; }
-.terr-float-rev { animation: terr-float 5.5s ease-in-out infinite reverse; }
-.terr-col-in { animation: terr-col-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
-.terr-fade-up { animation: terr-fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
-.terr-pop { animation: terr-pop 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.cirrus-float { animation: cirrus-float 4s ease-in-out infinite; }
+.cirrus-float-slow { animation: cirrus-float 6.5s ease-in-out infinite; }
+.cirrus-float-rev { animation: cirrus-float 5.5s ease-in-out infinite reverse; }
+.cirrus-col-in { animation: cirrus-col-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.cirrus-fade-up { animation: cirrus-fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.cirrus-pop { animation: cirrus-pop 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
 /* shimmering skeleton for "generating skills" */
-@keyframes terr-shimmer {
+@keyframes cirrus-shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
-.terr-shimmer {
+.cirrus-shimmer {
   background-image: linear-gradient(90deg, var(--surface-muted) 25%, var(--surface-sunken) 38%, var(--surface-muted) 54%);
   background-size: 200% 100%;
-  animation: terr-shimmer 1.5s ease-in-out infinite;
+  animation: cirrus-shimmer 1.5s ease-in-out infinite;
 }
-@keyframes terr-blink {
+@keyframes cirrus-blink {
   0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
   40% { opacity: 1; transform: translateY(-2px); }
 }
-.terr-dot { animation: terr-blink 1.2s ease-in-out infinite; }
+.cirrus-dot { animation: cirrus-blink 1.2s ease-in-out infinite; }

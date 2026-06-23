@@ -109,15 +109,15 @@ function EmptyCanvas() {
     <div className="absolute inset-0 z-10 flex items-center justify-center overflow-hidden p-6">
       {/* playful floating shapes */}
       <div className="pointer-events-none absolute inset-0">
-        <div className="terr-float-slow absolute left-[16%] top-[22%] size-14 rounded-2xl border-2 border-dashed border-primary/25" />
-        <div className="terr-float-rev absolute right-[18%] top-[28%] size-9 rounded-full bg-primary/10" />
-        <div className="terr-float absolute bottom-[24%] left-[26%] h-2.5 w-16 rounded-full bg-primary/10" />
-        <Sparkles className="terr-float-slow absolute right-[26%] bottom-[30%] size-5 text-primary/30" />
-        <div className="terr-float-rev absolute left-[40%] top-[16%] size-3 rounded-full bg-primary/20" />
+        <div className="cirrus-float-slow absolute left-[16%] top-[22%] size-14 rounded-2xl border-2 border-dashed border-primary/25" />
+        <div className="cirrus-float-rev absolute right-[18%] top-[28%] size-9 rounded-full bg-primary/10" />
+        <div className="cirrus-float absolute bottom-[24%] left-[26%] h-2.5 w-16 rounded-full bg-primary/10" />
+        <Sparkles className="cirrus-float-slow absolute right-[26%] bottom-[30%] size-5 text-primary/30" />
+        <div className="cirrus-float-rev absolute left-[40%] top-[16%] size-3 rounded-full bg-primary/20" />
       </div>
 
       <div className="relative flex max-w-sm flex-col items-center gap-4 text-center">
-        <div className="terr-float flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-[#837DFF] text-primary-foreground shadow-[0_14px_34px_-10px_rgba(91,87,242,0.65)]">
+        <div className="cirrus-float flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-[#837DFF] text-primary-foreground shadow-[0_14px_34px_-10px_rgba(91,87,242,0.65)]">
           <Wand2 className="size-7" />
         </div>
         <div>

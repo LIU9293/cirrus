@@ -308,7 +308,7 @@ export function AgentCanvas({ miniapp, onUpdateFlow, onNavigate, onNavStateChang
             ref={(el) => {
               colRefs.current[key] = el
             }}
-            className="terr-col-in"
+            className="cirrus-col-in"
           >
             {key === 'define' &&
               (reached === 0 ? (
@@ -487,7 +487,7 @@ function DefineChatColumn({
         )}
 
         {concept && (
-          <div className="terr-pop rounded-[16px] border border-border bg-surface p-4 shadow-[0_8px_24px_-6px_rgba(25,25,23,0.07)]">
+          <div className="cirrus-pop rounded-[16px] border border-border bg-surface p-4 shadow-[0_8px_24px_-6px_rgba(25,25,23,0.07)]">
             <div className="flex items-center gap-1.5">
               <Sparkles className="size-3.5 text-primary" />
               <span className="font-mono text-[10.5px] tracking-[0.12em] text-ink-tertiary">CONCEPT READY</span>
@@ -689,12 +689,12 @@ function CapabilitiesColumn({
       {planning && (
         <>
           <div className="flex items-center gap-2 px-1 pt-0.5 text-[12.5px] font-semibold text-ink-secondary">
-            <Sparkles className="size-4 text-primary terr-float" />
+            <Sparkles className="size-4 text-primary cirrus-float" />
             <span>Dreaming up capabilities</span>
             <span className="flex gap-0.5">
-              <span className="terr-dot size-1 rounded-full bg-primary" style={{ animationDelay: '0s' }} />
-              <span className="terr-dot size-1 rounded-full bg-primary" style={{ animationDelay: '0.2s' }} />
-              <span className="terr-dot size-1 rounded-full bg-primary" style={{ animationDelay: '0.4s' }} />
+              <span className="cirrus-dot size-1 rounded-full bg-primary" style={{ animationDelay: '0s' }} />
+              <span className="cirrus-dot size-1 rounded-full bg-primary" style={{ animationDelay: '0.2s' }} />
+              <span className="cirrus-dot size-1 rounded-full bg-primary" style={{ animationDelay: '0.4s' }} />
             </span>
           </div>
           {[0, 1, 2].map((i) => (
@@ -747,19 +747,19 @@ function SkillSkeleton({ index }: { index: number }) {
   const descW = ['78%', '64%', '70%'][index % 3]
   return (
     <div
-      className="terr-fade-up flex flex-col gap-3 rounded-[14px] border border-border bg-surface p-3.5"
+      className="cirrus-fade-up flex flex-col gap-3 rounded-[14px] border border-border bg-surface p-3.5"
       style={{ animationDelay: `${index * 90}ms` }}
     >
       <div className="flex items-center gap-2.5">
-        <div className="terr-shimmer size-[30px] shrink-0 rounded-lg" />
+        <div className="cirrus-shimmer size-[30px] shrink-0 rounded-lg" />
         <div className="flex flex-1 flex-col gap-1.5">
-          <div className="terr-shimmer h-3 rounded-full" style={{ width: titleW }} />
-          <div className="terr-shimmer h-2.5 rounded-full" style={{ width: descW }} />
+          <div className="cirrus-shimmer h-3 rounded-full" style={{ width: titleW }} />
+          <div className="cirrus-shimmer h-2.5 rounded-full" style={{ width: descW }} />
         </div>
-        <div className="terr-shimmer h-5 w-14 shrink-0 rounded-full" />
+        <div className="cirrus-shimmer h-5 w-14 shrink-0 rounded-full" />
       </div>
       <div className="flex justify-end">
-        <div className="terr-shimmer h-7 w-16 rounded-[9px]" />
+        <div className="cirrus-shimmer h-7 w-16 rounded-[9px]" />
       </div>
     </div>
   )
@@ -1146,7 +1146,7 @@ function SurfacesColumn({
             )}
           </div>
           {open && (
-            <div className="terr-pop absolute top-full left-0 z-10 mt-2 w-[210px] rounded-[12px] border border-border bg-surface p-1.5 shadow-[0_10px_28px_-8px_rgba(25,25,23,0.15)]">
+            <div className="cirrus-pop absolute top-full left-0 z-10 mt-2 w-[210px] rounded-[12px] border border-border bg-surface p-1.5 shadow-[0_10px_28px_-8px_rgba(25,25,23,0.15)]">
               {OPTS.map((o) => (
                 <button
                   key={o.name}
@@ -1904,9 +1904,9 @@ function SkillPanel({
                 <div className="flex items-center gap-2">
                   <Avatar sm />
                   <div className="flex items-center gap-1 rounded-[14px] rounded-bl-[4px] bg-surface-muted px-3 py-2.5">
-                    <span className="terr-dot size-1.5 rounded-full bg-ink-tertiary" style={{ animationDelay: '0s' }} />
-                    <span className="terr-dot size-1.5 rounded-full bg-ink-tertiary" style={{ animationDelay: '0.2s' }} />
-                    <span className="terr-dot size-1.5 rounded-full bg-ink-tertiary" style={{ animationDelay: '0.4s' }} />
+                    <span className="cirrus-dot size-1.5 rounded-full bg-ink-tertiary" style={{ animationDelay: '0s' }} />
+                    <span className="cirrus-dot size-1.5 rounded-full bg-ink-tertiary" style={{ animationDelay: '0.2s' }} />
+                    <span className="cirrus-dot size-1.5 rounded-full bg-ink-tertiary" style={{ animationDelay: '0.4s' }} />
                   </div>
                 </div>
               )}
@@ -2218,7 +2218,7 @@ function AddToRuntimeDialog({
   return (
     <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/30 p-4 sm:p-6" onMouseDown={onClose}>
       <div
-        className="terr-pop flex max-h-[80vh] w-full max-w-[460px] flex-col overflow-hidden rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
+        className="cirrus-pop flex max-h-[80vh] w-full max-w-[460px] flex-col overflow-hidden rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
@@ -2622,11 +2622,11 @@ function EmptyRuntimes({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="mt-7 flex flex-col items-center justify-center gap-5 rounded-[20px] border border-dashed border-border-strong bg-white/40 px-4 py-14 text-center sm:py-20">
       <div className="relative">
-        <div className="terr-float flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-[#837DFF] text-primary-foreground shadow-[0_14px_34px_-10px_rgba(91,87,242,0.55)]">
+        <div className="cirrus-float flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-[#837DFF] text-primary-foreground shadow-[0_14px_34px_-10px_rgba(91,87,242,0.55)]">
           <Server className="size-7" />
         </div>
-        <div className="terr-float-rev absolute -right-5 -top-3 size-3 rounded-full bg-primary/25" />
-        <div className="terr-float-slow absolute -left-6 bottom-0 size-2.5 rounded-full bg-primary/20" />
+        <div className="cirrus-float-rev absolute -right-5 -top-3 size-3 rounded-full bg-primary/25" />
+        <div className="cirrus-float-slow absolute -left-6 bottom-0 size-2.5 rounded-full bg-primary/20" />
       </div>
       <div>
         <div className="text-[17px] font-bold tracking-tight text-ink">No runtimes yet</div>
@@ -2845,7 +2845,7 @@ function RenameRuntimeDialog({
       onClick={(e) => e.stopPropagation()}
     >
       <form
-        className="terr-pop w-full max-w-[380px] rounded-[16px] border border-border bg-surface p-5 shadow-[0_26px_70px_-18px_rgba(25,25,23,0.35)]"
+        className="cirrus-pop w-full max-w-[380px] rounded-[16px] border border-border bg-surface p-5 shadow-[0_26px_70px_-18px_rgba(25,25,23,0.35)]"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
         onSubmit={async (e) => {
@@ -2916,7 +2916,7 @@ function CreateRuntimeDialog({
   return (
     <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/30 p-4 sm:p-6" onMouseDown={onClose}>
       <div
-        className="terr-pop flex max-h-[80vh] w-full max-w-[520px] flex-col overflow-hidden rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
+        className="cirrus-pop flex max-h-[80vh] w-full max-w-[520px] flex-col overflow-hidden rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
@@ -3822,7 +3822,7 @@ function ModelConfigDialog({
   return (
     <div className="fixed inset-0 z-[220] grid place-items-center bg-ink/30 p-6" onMouseDown={onClose}>
       <div
-        className="terr-pop w-full max-w-[520px] rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
+        className="cirrus-pop w-full max-w-[520px] rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
@@ -3985,7 +3985,7 @@ function AddAgentsDialog({
   return (
     <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/30 p-4 sm:p-6" onMouseDown={onClose}>
       <div
-        className="terr-pop flex max-h-[80vh] w-full max-w-[520px] flex-col overflow-hidden rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
+        className="cirrus-pop flex max-h-[80vh] w-full max-w-[520px] flex-col overflow-hidden rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
@@ -4099,7 +4099,7 @@ function BotsEmptyState({ onConnect }: { onConnect: () => void }) {
         {BOT_OPTIONS.map((o, i) => (
           <div
             key={o.platform}
-            className={cn('flex size-[52px] items-center justify-center rounded-[16px] border-2 border-white bg-white shadow-[0_12px_30px_-12px_rgba(25,25,23,0.3)]', i === 1 ? 'terr-float z-10 -mx-3 size-[60px]' : i === 0 ? 'terr-float-slow -rotate-12' : 'terr-float-rev rotate-12')}
+            className={cn('flex size-[52px] items-center justify-center rounded-[16px] border-2 border-white bg-white shadow-[0_12px_30px_-12px_rgba(25,25,23,0.3)]', i === 1 ? 'cirrus-float z-10 -mx-3 size-[60px]' : i === 0 ? 'cirrus-float-slow -rotate-12' : 'cirrus-float-rev rotate-12')}
             style={{ color: o.color }}
           >
             <span className="[&_svg]:size-6">{o.icon}</span>
@@ -4137,7 +4137,7 @@ function ConnectBotDialog({
   return (
     <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/30 p-6" onMouseDown={onClose}>
       <div
-        className="terr-pop flex w-full max-w-[440px] flex-col overflow-hidden rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
+        className="cirrus-pop flex w-full max-w-[440px] flex-col overflow-hidden rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border px-5 py-4">

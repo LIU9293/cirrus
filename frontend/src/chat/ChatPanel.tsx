@@ -321,7 +321,7 @@ function getLiveSuggestions(miniapp: MiniappRecord | null): string[] {
     return [
       'Create a miniapp in Dev Mode, then switch back here to try it as a user.',
       'Live Mode keeps the developer chat out of the way while you use the canvas.',
-      'User-entered app data will stay saved through the TerrUI state bridge.',
+      'User-entered app data will stay saved through the CirrusUI state bridge.',
     ]
   }
 

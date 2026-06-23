@@ -34,7 +34,7 @@ function buildSandboxFetchCode(input: {
 (async () => {
   const fs = require('node:fs');
   const cp = require('node:child_process');
-  const dir = '/tmp/terr-gmail-agent';
+  const dir = '/tmp/cirrus-gmail-agent';
   fs.mkdirSync(dir, { recursive: true });
   if (!fs.existsSync(dir + '/package.json')) fs.writeFileSync(dir + '/package.json', JSON.stringify({ type: 'commonjs' }));
   if (!fs.existsSync(dir + '/node_modules/imapflow')) {

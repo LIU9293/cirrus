@@ -1,7 +1,7 @@
-// miniapp-runtime/src/terrui.tsx
+// miniapp-runtime/src/cirrusui.tsx
 //
-// The miniapp-side SDK. Agent-authored apps import from "@/terrui" to talk to the
-// host through window.TerrUI (injected by the bridge). This is the ONLY channel a
+// The miniapp-side SDK. Agent-authored apps import from "@/cirrusui" to talk to the
+// host through window.CirrusUI (injected by the bridge). This is the ONLY channel a
 // miniapp has to the outside world — there is no direct network access.
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
@@ -15,7 +15,7 @@ export interface ActionResult {
   stateVersion?: number
 }
 
-interface TerrUIBridge {
+interface CirrusUIBridge {
   getState(): unknown
   getStateVersion(): number
   subscribe(listener: (state: unknown) => void): () => void
@@ -27,7 +27,7 @@ interface TerrUIBridge {
 
 declare global {
   interface Window {
-    TerrUI?: TerrUIBridge
+    CirrusUI?: CirrusUIBridge
   }
 }
 
@@ -35,20 +35,20 @@ const OFFLINE_RESULT: ActionResult = {
   ok: false,
   status: 'unavailable',
   code: 'bridge_unavailable',
-  message: 'The Terr host bridge is not available.',
+  message: 'The Cirrus host bridge is not available.',
   retryable: false,
   actionId: '',
 }
 
-function bridge(): TerrUIBridge | undefined {
-  return typeof window !== 'undefined' ? window.TerrUI : undefined
+function bridge(): CirrusUIBridge | undefined {
+  return typeof window !== 'undefined' ? window.CirrusUI : undefined
 }
 
 /**
  * Subscribe to the host-owned state model. Re-renders whenever the host pushes a
  * new state. The generic T is the shape declared in the miniapp manifest's stateModel.
  */
-export function useTerrState<T = Record<string, unknown>>(): T {
+export function useCirrusState<T = Record<string, unknown>>(): T {
   const subscribe = useCallback((onChange: () => void) => {
     const ui = bridge()
     if (!ui) return () => {}
@@ -67,7 +67,7 @@ export interface TerrApi {
   openLink: (href: string) => void
 }
 
-export function useTerr(): TerrApi {
+export function useCirrus(): TerrApi {
   const setState = useCallback(
     (patch: Record<string, unknown>) => bridge()?.action('terr.set_state', { patch }) ?? Promise.resolve(OFFLINE_RESULT),
     [],
@@ -85,7 +85,7 @@ export function useTerr(): TerrApi {
  * so a button can show a spinner while the agent works.
  */
 export function useAgentAction(actionId: string) {
-  const { action } = useTerr()
+  const { action } = useCirrus()
   const [pending, setPending] = useState(false)
   const [result, setResult] = useState<ActionResult | null>(null)
   const run = useCallback(

@@ -1,6 +1,6 @@
 import type { PlatformSkill } from '../../../shared/protocol.ts'
 
-// The platform Skills Library. These are the COMPLETE capabilities Terr offers out
+// The platform Skills Library. These are the COMPLETE capabilities Cirrus offers out
 // of the box. Each one declares its contract (shared/terr_skill_contract.md):
 //   - `credentials`: what the user must configure when adding the skill, and
 //   - `tools`:       the tool calls it exposes to the agent (the standard contract).

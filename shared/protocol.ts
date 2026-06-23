@@ -7,7 +7,7 @@
 //
 // A miniapp is a single self-contained React app rendered inside a sandboxed
 // iframe. It never talks to the network directly for app logic; instead it talks
-// to the host through `window.TerrUI` (see shared/bridge.ts). The two things a
+// to the host through `window.CirrusUI` (see shared/bridge.ts). The two things a
 // miniapp can do through the bridge are:
 //   1. read + persist a typed STATE MODEL (host-owned, survives reload), and
 //   2. invoke ACTIONS — either a built-in state mutation or an AGENT action that
@@ -47,7 +47,7 @@ export type ActionKind =
   | 'agent'
 
 export interface ActionSpec {
-  /** Stable id the miniapp calls via TerrUI.action(id, payload). */
+  /** Stable id the miniapp calls via CirrusUI.action(id, payload). */
   id: string
   kind: ActionKind
   description: string
@@ -369,7 +369,7 @@ export interface RuntimeBot {
 /** A reference to an agent placed in a runtime. `miniappId` is set for the
  *  user's own agents; community agents are referenced by name only. */
 export type RuntimeAgentModelMode =
-  /** Use Terr's platform LLM settings. This is the only fully implemented mode today. */
+  /** Use Cirrus's platform LLM settings. This is the only fully implemented mode today. */
   | 'platform'
   /** User supplies an OpenAI-compatible endpoint + API key. Skeleton only for now. */
   | 'custom_llm_api'

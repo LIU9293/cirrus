@@ -1,6 +1,6 @@
 import type { OpenAI } from 'openai'
 
-// Tool schemas exposed to the Terr Developer Agent.
+// Tool schemas exposed to the Cirrus Developer Agent.
 export const developerTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: 'function',

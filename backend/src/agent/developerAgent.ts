@@ -44,7 +44,7 @@ const ALWAYS_APPLIED_SKILLS = [
   {
     name: 'shadcn-ui',
     instruction:
-      'Apply this skill as shadcn/ui-informed composition guidance. Respect the Terr miniapp runtime boundary: React + Tailwind + TerrUI only.',
+      'Apply this skill as shadcn/ui-informed composition guidance. Respect the Cirrus miniapp runtime boundary: React + Tailwind + CirrusUI only.',
   },
 ]
 

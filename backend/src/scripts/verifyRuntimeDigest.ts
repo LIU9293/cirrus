@@ -1,6 +1,6 @@
 import { loadRuntime } from '../runtimeStore.ts'
 import { loadRecord } from '../store.ts'
-import { runTerrRuntimeAction } from '../agent/terrRuntimeAgent.ts'
+import { runCirrusRuntimeAction } from '../agent/cirrusRuntimeAgent.ts'
 import { getDatastoreDriver } from '../datastore/index.ts'
 
 async function main() {
@@ -19,7 +19,7 @@ async function main() {
   const action = record.manifest?.actions.find((item) => item.id === 'run_gmail_digest')
   if (!action) throw new Error(`Miniapp ${record.id} does not declare run_gmail_digest.`)
 
-  const actionOutcome = await runTerrRuntimeAction(record, action, { source: 'verify:runtime-digest', runtimeId: runtime.id, sandboxId: runtime.sandboxId })
+  const actionOutcome = await runCirrusRuntimeAction(record, action, { source: 'verify:runtime-digest', runtimeId: runtime.id, sandboxId: runtime.sandboxId })
   const ds = getDatastoreDriver()
   const digestRuns = await ds.query(record.id, { table: 'digest_runs', limit: 1000 })
   const emails = await ds.query(record.id, { table: 'emails', limit: 1 })

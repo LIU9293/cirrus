@@ -171,7 +171,7 @@ export async function runRuntimeAgentLoopInSandbox(
   history: ChatTurn[],
   binding?: { runtimeId?: string; agentKey?: string },
 ): Promise<SandboxRuntimeAgentResult> {
-  const activities: DeveloperChatActivity[] = [{ kind: 'status', text: 'Running TerrRuntimeAgent loop in E2B sandbox…' }]
+  const activities: DeveloperChatActivity[] = [{ kind: 'status', text: 'Running CirrusRuntimeAgent loop in E2B sandbox…' }]
   const userTurn = history.at(-1)
   if (!userTurn || userTurn.role !== 'user') {
     return { message: '', patched: false, activities, ranInSandbox: false, error: 'Missing user turn.' }

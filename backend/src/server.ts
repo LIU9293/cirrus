@@ -8,14 +8,14 @@ import * as db from './db.ts'
 import { createMiniapp, deleteMiniapp, listRecords, loadRecord, saveRecord } from './store.ts'
 import { runDeveloperAgent, type ChatTurn, type AgentEvent } from './agent/developerAgent.ts'
 import {
-  decideTerrRuntimeRouting,
-  describeTerrRuntimeAgentSpecsForRuntime,
-  routeTerrRuntimeMessage,
-  runTerrRuntimeCommunityChat,
-  runTerrRuntimeCoordinatorChat,
-  runTerrRuntimeAction,
-  runTerrRuntimeChat,
-} from './agent/terrRuntimeAgent.ts'
+  decideCirrusRuntimeRouting,
+  describeCirrusRuntimeAgentSpecsForRuntime,
+  routeCirrusRuntimeMessage,
+  runCirrusRuntimeCommunityChat,
+  runCirrusRuntimeCoordinatorChat,
+  runCirrusRuntimeAction,
+  runCirrusRuntimeChat,
+} from './agent/cirrusRuntimeAgent.ts'
 import { resolveCanvasScreenshot } from './canvasScreenshot.ts'
 import { PLATFORM_SKILLS } from './skills/library.ts'
 import { resolveSkillSettings, writeSkillSettings, settingsFilled, declaredSettings, skillBindingKey, type SkillBindingContext } from './skills/settings.ts'
@@ -364,9 +364,9 @@ app.post('/api/miniapps/:id/live-chat', async (req, res) => {
     source: 'own',
     miniappId: record.id,
   }
-  const outcome = await runTerrRuntimeChat(record, history, {
-    routing: decideTerrRuntimeRouting(1),
-    agentSpecs: describeTerrRuntimeAgentSpecsForRuntime([agentRef], new Map([[record.id, record]])),
+  const outcome = await runCirrusRuntimeChat(record, history, {
+    routing: decideCirrusRuntimeRouting(1),
+    agentSpecs: describeCirrusRuntimeAgentSpecsForRuntime([agentRef], new Map([[record.id, record]])),
   })
   return res.json(outcome)
 })
@@ -445,7 +445,7 @@ async function runMiniappHostAction(record: MiniappRecord, actionId: string, pay
   // skill settings/credentials resolve against this runtime's per-agent binding.
   const runtimeId = isPlainObject(payload) && typeof payload.runtimeId === 'string' ? payload.runtimeId : undefined
   const binding = runtimeId ? { runtimeId, agentKey: `own:${record.id}` } : undefined
-  return await runTerrRuntimeAction(record, action, payload, binding)
+  return await runCirrusRuntimeAction(record, action, payload, binding)
 }
 
 app.post('/api/miniapps/:id/actions', async (req, res) => {
@@ -616,7 +616,7 @@ app.delete('/api/runtimes/:id', async (req, res) => {
 })
 
 // Chat with a runtime. Single-agent runtimes use direct handoff. Multi-agent
-// runtimes first pass through TerrRuntimeAgent for a lightweight routing /
+// runtimes first pass through CirrusRuntimeAgent for a lightweight routing /
 // coordination decision, then hand off to the selected own or community agent.
 app.post('/api/runtimes/:id/chat', async (req, res) => {
   const startedAt = Date.now()
@@ -631,7 +631,7 @@ app.post('/api/runtimes/:id/chat', async (req, res) => {
     res.setHeader('Cache-Control', 'no-cache')
     res.setHeader('Connection', 'keep-alive')
     res.flushHeaders?.()
-    emit({ type: 'status', text: 'Working with TerrRuntimeAgent…' })
+    emit({ type: 'status', text: 'Working with CirrusRuntimeAgent…' })
   }
   if (runtime.sandboxKind === 'e2b' && runtime.sandboxId && runtime.agents.some((agent) => agent.source === 'community' && agent.installation?.status !== 'ready')) {
     runtime = await installRuntimeCommunityAgents(runtime)
@@ -644,9 +644,9 @@ app.post('/api/runtimes/:id/chat', async (req, res) => {
     const record = await loadRecord(agent.miniappId)
     if (record) ownRecordsByMiniappId.set(agent.miniappId, record)
   }
-  const routing = decideTerrRuntimeRouting(runtime.agents.length)
-  const agentSpecs = describeTerrRuntimeAgentSpecsForRuntime(runtime.agents, ownRecordsByMiniappId)
-  const route = routing.mode === 'direct' ? routeTerrRuntimeMessage(history, agentSpecs.slice(0, 1)) : routeTerrRuntimeMessage(history, agentSpecs)
+  const routing = decideCirrusRuntimeRouting(runtime.agents.length)
+  const agentSpecs = describeCirrusRuntimeAgentSpecsForRuntime(runtime.agents, ownRecordsByMiniappId)
+  const route = routing.mode === 'direct' ? routeCirrusRuntimeMessage(history, agentSpecs.slice(0, 1)) : routeCirrusRuntimeMessage(history, agentSpecs)
   const selectedAgent = route.targetAgentKey ? runtime.agents.find((agent) => agent.key === route.targetAgentKey) : null
   const selectedRecord = selectedAgent?.source === 'own' && selectedAgent.miniappId ? ownRecordsByMiniappId.get(selectedAgent.miniappId) : null
   const sandboxId = runtime.sandboxKind === 'e2b' ? runtime.sandboxId : null
@@ -657,7 +657,7 @@ app.post('/api/runtimes/:id/chat', async (req, res) => {
     // A built own-agent: drive its real runtime agent (skills + soul). When the
     // runtime has an E2B sandbox, the model/tool-choice loop runs there and the
     // host only brokers declared tools + persistence.
-    const outcome = await runTerrRuntimeChat(selectedRecord, history, {
+    const outcome = await runCirrusRuntimeChat(selectedRecord, history, {
       sandboxId,
       routing,
       agentSpecs,
@@ -667,7 +667,7 @@ app.post('/api/runtimes/:id/chat', async (req, res) => {
     message = outcome.message
     activities = outcome.activities ?? []
   } else if (selectedAgent?.source === 'community') {
-    const outcome = await runTerrRuntimeCommunityChat(selectedAgent, history, {
+    const outcome = await runCirrusRuntimeCommunityChat(selectedAgent, history, {
       sandboxId,
       routing,
       agentSpecs,
@@ -676,7 +676,7 @@ app.post('/api/runtimes/:id/chat', async (req, res) => {
     message = outcome.message
     activities = outcome.activities ?? []
   } else if (runtime.agents.length > 0) {
-    const outcome = await runTerrRuntimeCoordinatorChat(history, {
+    const outcome = await runCirrusRuntimeCoordinatorChat(history, {
       sandboxId,
       routing,
       agentSpecs,
@@ -876,7 +876,7 @@ app.get('*', (req, res, next) => {
 async function start() {
   await db.init()
   app.listen(config.port, () => {
-    console.log(`[terr-miniapp-3] backend on http://localhost:${config.port} (model: ${config.model})`)
+    console.log(`[cirrus] backend on http://localhost:${config.port} (model: ${config.model})`)
     void startScheduler().catch((err) => console.error('[scheduler] failed to start', err))
   })
 }

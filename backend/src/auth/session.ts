@@ -5,7 +5,7 @@ import { config } from '../config.ts'
 // Stateless session: a compact HS256-style JWT in an httpOnly cookie. Signed with
 // SESSION_SECRET; no server-side session store to maintain.
 
-const COOKIE = 'terr_session'
+const COOKIE = 'cirrus_session'
 const MAX_AGE_SEC = 60 * 60 * 24 * 30 // 30 days
 
 function b64url(input: Buffer | string): string {

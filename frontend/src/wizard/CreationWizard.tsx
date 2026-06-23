@@ -145,7 +145,7 @@ export function CreationWizard({
           <div className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <span className="text-sm font-bold">T</span>
           </div>
-          <span className="text-sm font-semibold tracking-tight">Terr Studio</span>
+          <span className="text-sm font-semibold tracking-tight">Cirrus Studio</span>
         </div>
         <Stepper activeIndex={activeIndex} />
         <div className="flex justify-end">

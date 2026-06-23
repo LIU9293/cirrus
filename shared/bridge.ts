@@ -3,7 +3,7 @@
 // REUSED from terr: frontend/src/new-ui/chat/appFrameBridge.ts (the "JS bridge plugin").
 // This is the host<->frame communication layer. The host:
 //   - wraps a miniapp's single-file HTML with buildTerrAppFrameSrcDoc() which injects
-//     a CSP <meta> + a <script> that defines window.TerrUI inside the sandboxed iframe,
+//     a CSP <meta> + a <script> that defines window.CirrusUI inside the sandboxed iframe,
 //   - pushes state with buildAppFrameHostStateMessage(),
 //   - parses frame->host messages (action / open_link / ready / resize / diagnostic),
 //   - replies to actions with buildAppFrameHostActionResultMessage().
@@ -403,7 +403,7 @@ function bridgeScript(box: AppFrameBridgeBox, bridgeToken: string): string {
   const ensureInspectOverlay = () => {
     if (inspectOverlay) return inspectOverlay;
     inspectOverlay = document.createElement('div');
-    inspectOverlay.setAttribute('data-terr-inspect-overlay', 'true');
+    inspectOverlay.setAttribute('data-cirrus-inspect-overlay', 'true');
     inspectOverlay.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;border:2px solid #1683ff;background:rgba(22,131,255,.12);border-radius:6px;display:none;';
     document.documentElement.appendChild(inspectOverlay);
     return inspectOverlay;
@@ -555,7 +555,7 @@ function bridgeScript(box: AppFrameBridgeBox, bridgeToken: string): string {
   const inspectTarget = (event) => {
     const target = event.target;
     if (!target || !(target instanceof Element)) return null;
-    if (target.closest('[data-terr-inspect-overlay]')) return null;
+    if (target.closest('[data-cirrus-inspect-overlay]')) return null;
     return target;
   };
   document.addEventListener('pointermove', (event) => {
@@ -629,7 +629,7 @@ function bridgeScript(box: AppFrameBridgeBox, bridgeToken: string): string {
     const reason = event.reason;
     postDiagnostic('error', reason && reason.message ? reason.message : String(reason || 'Unhandled app frame rejection.'), reason && reason.stack);
   });
-  Object.defineProperty(window, 'TerrUI', { value: api, configurable: true });
+  Object.defineProperty(window, 'CirrusUI', { value: api, configurable: true });
   window.addEventListener('message', (event) => {
     if (event.source !== window.parent) return;
     const data = event.data;

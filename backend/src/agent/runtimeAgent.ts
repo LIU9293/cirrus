@@ -238,14 +238,14 @@ export async function runRuntimeAction(
 export async function runRuntimeChat(
   record: MiniappRecord,
   history: ChatTurn[],
-  opts: { sandboxId?: string | null; terrRuntimeContext?: string; binding?: RuntimeBinding } = {},
+  opts: { sandboxId?: string | null; cirrusRuntimeContext?: string; binding?: RuntimeBinding } = {},
 ): Promise<RuntimeChatOutcome> {
   const manifest = record.manifest
   const soul = await soulBlock(record)
   const system = [
     `You are the live app agent for the miniapp "${manifest?.name ?? record.id}".`,
     runtimeEnvironmentBlock(opts.sandboxId),
-    opts.terrRuntimeContext ? `TerrRuntimeAgent context:\n${opts.terrRuntimeContext}` : '',
+    opts.cirrusRuntimeContext ? `CirrusRuntimeAgent context:\n${opts.cirrusRuntimeContext}` : '',
     soul,
     'You are talking to an end user using the app. Help them use it. When they ask you to change app data,',
     'call patch_state to shallow-merge JSON-serializable updates into the shared state.',

@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:18
-    container_name: terr-postgres
+    container_name: cirrus-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: terr
@@ -12,7 +12,7 @@ services:
       - '5433:5432'
     volumes:
       # PG18 Docker stores data in a major-version subdir; mount the parent.
-      - terr-pgdata:/var/lib/postgresql
+      - cirrus-pgdata:/var/lib/postgresql
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U terr -d terr']
       interval: 5s
@@ -20,4 +20,4 @@ services:
       retries: 10
 
 volumes:
-  terr-pgdata:
+  cirrus-pgdata:

@@ -499,7 +499,7 @@ function LoginScreen({ info, onSignedIn }: { info: AuthInfo; onSignedIn: (user: 
   return (
     <div className="dot-bg grid h-full w-full place-items-center p-6">
       <div className="relative z-[1] w-full max-w-[360px] rounded-[18px] border border-border bg-surface p-7 shadow-[0_24px_60px_-20px_rgba(25,25,23,0.25)]">
-        <div className="text-[20px] font-bold tracking-tight text-ink">Terr Studio</div>
+        <div className="text-[20px] font-bold tracking-tight text-ink">Cirrus Studio</div>
         <div className="mt-1 text-[13px] text-ink-secondary">Sign in to access your agents and runtimes.</div>
         {info.googleAuth && (
           <a

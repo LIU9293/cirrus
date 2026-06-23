@@ -6,7 +6,7 @@ import { viteSingleFile } from 'vite-plugin-singlefile'
 
 // Builds the agent-authored miniapp into ONE self-contained index.html:
 // React + Tailwind + the app code are all inlined. That single file is what the
-// host wraps with the TerrUI bridge (shared/bridge.ts) and renders in a sandboxed
+// host wraps with the CirrusUI bridge (shared/bridge.ts) and renders in a sandboxed
 // iframe — so there are zero external requests, satisfying the iframe CSP.
 export default defineConfig({
   plugins: [react(), tailwindcss(), viteSingleFile()],
