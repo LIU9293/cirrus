@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { motion, AnimatePresence } from 'motion/react'
+import { motion, AnimatePresence, type Variants } from 'motion/react'
 import {
   ArrowUp,
   ArrowRight,
@@ -2179,7 +2179,7 @@ function AddToRuntimeDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/30 p-4 sm:p-6" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/40 backdrop-blur-sm cirrus-overlay p-4 sm:p-6" onMouseDown={onClose}>
       <div
         className="cirrus-pop flex max-h-[80vh] w-full max-w-[460px] flex-col overflow-hidden rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
         onMouseDown={(e) => e.stopPropagation()}
@@ -2322,6 +2322,13 @@ function communityAgentRef(agent: CommunityAgent): RuntimeAgentRef {
   return { key: `community:${agent.name}`, name: agent.name, source: 'community' }
 }
 
+// Staggered reveal for the expandable card's hidden content (cult-ui style:
+// each row springs/fades in).
+const EXPAND_ITEM: Variants = {
+  hidden: { opacity: 0, y: 8 },
+  show: { opacity: 1, y: 0, transition: { type: 'spring', bounce: 0.3, duration: 0.4 } },
+}
+
 export function CommunityPage({ onNavigate }: { onNavigate: (v: NavView) => void }) {
   const [usage, setUsage] = useState<Record<string, number>>({})
   useEffect(() => {
@@ -2390,25 +2397,31 @@ function CommunityAgentCard({ agent, usedIn, onNavigate }: { agent: CommunityAge
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ height: { type: 'spring', bounce: 0.3, duration: 0.5 }, opacity: { duration: 0.15 } }}
             style={{ overflow: 'hidden' }}
           >
-            <div className="mt-1 flex flex-col gap-3 border-t border-border pt-3">
-              <div className="flex items-center gap-2 text-[12px] text-ink-secondary">
+            <motion.div
+              className="mt-1 flex flex-col gap-3 border-t border-border pt-3"
+              variants={{ show: { transition: { staggerChildren: 0.06, delayChildren: 0.08 } }, hidden: {} }}
+              initial="hidden"
+              animate="show"
+            >
+              <motion.div variants={EXPAND_ITEM} className="flex items-center gap-2 text-[12px] text-ink-secondary">
                 <span className="grid size-5 place-items-center rounded-full bg-accent-soft text-[9px] font-bold text-accent-ink">C</span>
                 Created by <span className="font-semibold text-ink">Cirrus</span>
-              </div>
-              <div className="flex items-center gap-2 text-[12px] text-ink-secondary">
+              </motion.div>
+              <motion.div variants={EXPAND_ITEM} className="flex items-center gap-2 text-[12px] text-ink-secondary">
                 <Server className="size-4 text-ink-tertiary" />
                 Used in <span className="font-semibold text-ink">{usedIn}</span> runtime{usedIn === 1 ? '' : 's'}
-              </div>
-              <button
+              </motion.div>
+              <motion.button
+                variants={EXPAND_ITEM}
                 onClick={(e) => { e.stopPropagation(); setAddOpen(true) }}
                 className="inline-flex w-full items-center justify-center gap-1.5 rounded-[11px] bg-primary px-4 py-2.5 text-[13px] font-semibold text-primary-foreground hover:opacity-90"
               >
                 Use this agent <ArrowRight className="size-[15px]" />
-              </button>
-            </div>
+              </motion.button>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -2848,7 +2861,7 @@ function RenameRuntimeDialog({
   const trimmed = name.trim()
   return (
     <div
-      className="fixed inset-0 z-[200] grid place-items-center bg-ink/30 p-6"
+      className="fixed inset-0 z-[200] grid place-items-center bg-ink/40 backdrop-blur-sm cirrus-overlay p-6"
       onMouseDown={onClose}
       onClick={(e) => e.stopPropagation()}
     >
@@ -2922,7 +2935,7 @@ function CreateRuntimeDialog({
   const canCreate = picked.length > 0
 
   return (
-    <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/30 p-4 sm:p-6" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/40 backdrop-blur-sm cirrus-overlay p-4 sm:p-6" onMouseDown={onClose}>
       <div
         className="cirrus-pop flex max-h-[80vh] w-full max-w-[520px] flex-col overflow-hidden rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
         onMouseDown={(e) => e.stopPropagation()}
@@ -3249,16 +3262,23 @@ function RuntimeWindow({
   }
 
   return (
+    <>
+      {max && !compactWindow && (
+        <div
+          className="cirrus-overlay fixed inset-0 z-[270] bg-ink/55 backdrop-blur-sm"
+          onPointerDown={(e) => { e.stopPropagation(); setMax(false) }}
+        />
+      )}
     <div
       ref={rootRef}
       onPointerDown={(e) => { e.stopPropagation(); onFront() }}
       className={cn(
-        'fixed z-[120] cursor-default select-text',
+        'fixed cursor-default select-text',
         compactWindow
-          ? 'inset-x-2 bottom-2 top-2'
+          ? 'z-[120] inset-x-2 bottom-2 top-2'
           : max
-            ? 'inset-x-6 bottom-6 top-[88px]'
-            : 'left-1/2 top-1/2',
+            ? 'z-[280] inset-5'
+            : 'z-[120] left-1/2 top-1/2',
       )}
       style={compactWindow || max ? undefined : { width: size.w, transform: `translate(calc(-50% + ${d.x + stagger}px), calc(-50% + ${d.y + stagger}px))` }}
     >
@@ -3441,6 +3461,7 @@ function RuntimeWindow({
         </div>
       </div>
     </div>
+    </>
   )
 }
 
@@ -3828,7 +3849,7 @@ function ModelConfigDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-[220] grid place-items-center bg-ink/30 p-6" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[220] grid place-items-center bg-ink/40 backdrop-blur-sm cirrus-overlay p-6" onMouseDown={onClose}>
       <div
         className="cirrus-pop w-full max-w-[520px] rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
         onMouseDown={(e) => e.stopPropagation()}
@@ -3991,7 +4012,7 @@ function AddAgentsDialog({
   const picked = Object.values(selected)
 
   return (
-    <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/30 p-4 sm:p-6" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/40 backdrop-blur-sm cirrus-overlay p-4 sm:p-6" onMouseDown={onClose}>
       <div
         className="cirrus-pop flex max-h-[80vh] w-full max-w-[520px] flex-col overflow-hidden rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
         onMouseDown={(e) => e.stopPropagation()}
@@ -4143,7 +4164,7 @@ function ConnectBotDialog({
   const opt = BOT_OPTIONS.find((o) => o.platform === platform)!
 
   return (
-    <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/30 p-6" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/40 backdrop-blur-sm cirrus-overlay p-6" onMouseDown={onClose}>
       <div
         className="cirrus-pop flex w-full max-w-[440px] flex-col overflow-hidden rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
         onMouseDown={(e) => e.stopPropagation()}

@@ -135,6 +135,12 @@
   0% { opacity: 0; transform: translateY(6px) scale(0.96); }
   100% { opacity: 1; transform: none; }
 }
+/* Dialog/overlay backdrop fade-in (dim + blur ease in together). */
+@keyframes cirrus-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.cirrus-overlay { animation: cirrus-overlay-in 0.2s ease-out both; }
 @keyframes cirrus-float {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-9px); }
