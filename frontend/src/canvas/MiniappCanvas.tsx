@@ -15,6 +15,8 @@ interface Props {
   onElementSelected: (selection: CanvasElementSelection) => void
   /** Show the built-in title header (default true). The panel hides it. */
   chrome?: boolean
+  /** Route actions through the public, no-auth endpoint (shared /r/:id page). */
+  public?: boolean
 }
 
 export interface MiniappCanvasHandle {
@@ -31,10 +33,12 @@ export const MiniappCanvas = forwardRef<MiniappCanvasHandle, Props>(function Min
   onToggleElementSelect,
   onElementSelected,
   chrome = true,
+  public: publicRuntime = false,
 }: Props, ref) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const { srcDoc, captureScreenshot } = useMiniappHost(iframeRef, miniapp, {
     runtimeId,
+    publicRuntime,
     onState,
     inspectMode: selectingElement,
     onInspectSelection: onElementSelected,

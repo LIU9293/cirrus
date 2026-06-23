@@ -39,6 +39,7 @@ import {
   Pause,
   Power,
   Copy,
+  Upload,
 } from 'lucide-react'
 import type {
   BotPlatform,
@@ -87,6 +88,7 @@ import {
   saveRuntimeAgentSkillSettings,
   getCommunityUsage,
   getMiniapp,
+  loadDataset,
   type AgentEvent,
   type ChatTurn,
   type DatastoreTableInfo,
@@ -1066,6 +1068,184 @@ function DatabaseSkillDiagnostics({ appId }: { appId: string }) {
   )
 }
 
+const DEFAULT_VOCAB_SOURCES = [
+  {
+    label: 'CET-4',
+    url: 'https://raw.githubusercontent.com/cuttlin/Vocabulary-of-CET-4/refs/heads/master/TXT/%E6%80%BB%E8%A1%A8/%E5%9B%9B%E7%BA%A7%E8%AF%8D%E6%B1%87%E6%80%BB%E8%A1%A8.txt',
+  },
+  {
+    label: 'IELTS',
+    url: 'https://raw.githubusercontent.com/fanhongtao/IELTS/refs/heads/master/IELTS%20Word%20List.txt',
+  },
+] as const
+
+function compactIdPart(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48) || 'word'
+}
+
+function vocabRow(source: string, word: string, phonetic: string, definition: string, index: number, importedAt: string) {
+  return {
+    id: `${compactIdPart(source)}_${compactIdPart(word)}_${index}`,
+    word: word.replace(/\*+$/g, ''),
+    source_vocab: source,
+    phonetic: phonetic.trim(),
+    definition: definition.trim(),
+    translation: definition.trim(),
+    example: '',
+    mastery: 0,
+    last_seen: '',
+    created_at: importedAt,
+  }
+}
+
+function parseCet4Vocabulary(text: string, importedAt: string) {
+  const rows: Record<string, unknown>[] = []
+  const seen = new Set<string>()
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || /^[A-Z]$/.test(trimmed)) continue
+    const matches = [...trimmed.matchAll(/(?:^|\s)([A-Za-z][A-Za-z -]*?)\/([^/\n]+)\/(.+?)(?=\s+[A-Za-z][A-Za-z -]*?\/[^/\n]+\/|$)/g)]
+    for (const match of matches) {
+      const word = match[1]?.trim()
+      const definition = match[3]?.trim()
+      if (!word || !definition) continue
+      const key = `CET-4:${word.toLowerCase()}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      rows.push(vocabRow('CET-4', word, match[2] ?? '', definition, rows.length + 1, importedAt))
+    }
+  }
+  return rows
+}
+
+function parseIeltsVocabulary(text: string, importedAt: string) {
+  const rows: Record<string, unknown>[] = []
+  const seen = new Set<string>()
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || /^README$|^Word List\s+\d+/i.test(trimmed) || /^[《#]|^范洪滔|^\d{4}-\d{2}-\d{2}/.test(trimmed)) continue
+    const match = trimmed.match(/^([A-Za-z][A-Za-z-]*\*?)\s+((?:\/[^/]+\/)|(?:\[[^\]]+\])|(?:\{[^}]+\}))\s+(.+)$/)
+    if (!match) continue
+    const word = match[1].trim()
+    const definition = match[3].trim()
+    const key = `IELTS:${word.replace(/\*+$/g, '').toLowerCase()}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    rows.push(vocabRow('IELTS', word, match[2] ?? '', definition, rows.length + 1, importedAt))
+  }
+  return rows
+}
+
+function parseVocabularySource(label: string, text: string, importedAt: string) {
+  return label === 'CET-4' ? parseCet4Vocabulary(text, importedAt) : parseIeltsVocabulary(text, importedAt)
+}
+
+function DatasetSkillLoader({
+  appId,
+  skill,
+  onUpdate,
+}: {
+  appId: string
+  skill: MiniappSkill
+  onUpdate: (partial: Partial<MiniappSkill>) => void
+}) {
+  const [urls, setUrls] = useState<string[]>(DEFAULT_VOCAB_SOURCES.map((source) => source.url))
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const loadedTable = skill.config?.table as string | undefined
+  const loadedRows = skill.config?.rowCount as number | undefined
+  const schema = (skill.config?.schema as { name: string; type: string }[] | undefined) ?? []
+
+  const importVocabulary = async () => {
+    setBusy(true)
+    setMessage(null)
+    setError(null)
+    try {
+      const importedAt = new Date().toISOString()
+      const chunks = await Promise.all(
+        DEFAULT_VOCAB_SOURCES.map(async (source, index) => {
+          const res = await fetch(urls[index])
+          if (!res.ok) throw new Error(`${source.label} fetch failed: HTTP ${res.status}`)
+          const text = await res.text()
+          const rows = parseVocabularySource(source.label, text, importedAt)
+          if (!rows.length) throw new Error(`${source.label} parsed 0 rows`)
+          return { source, rows }
+        }),
+      )
+      const rows = chunks.flatMap((chunk) => chunk.rows)
+      const result = await loadDataset(appId, {
+        skillId: skill.id,
+        format: 'json',
+        table: 'vocabulary_items',
+        text: JSON.stringify(rows),
+      })
+      if (!result.ok) throw new Error(result.message)
+      onUpdate({
+        status: 'active',
+        source: 'library',
+        config: { ...skill.config, table: result.table, rowCount: result.rowCount, schema: result.columns },
+      })
+      setMessage(`${result.message} CET-4 ${chunks[0].rows.length} rows, IELTS ${chunks[1].rows.length} rows.`)
+    } catch (err) {
+      setError(String((err as Error)?.message ?? err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="shrink-0 rounded-[12px] border border-border bg-surface p-3">
+      <div className="flex items-center gap-2">
+        <Database className="size-4 text-ink-secondary" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-semibold text-ink">Dataset import</div>
+          <div className="mt-0.5 text-[11.5px] text-ink-tertiary">Fetch raw vocabulary files and load parsed rows into this agent datastore.</div>
+        </div>
+      </div>
+      {loadedTable && (
+        <div className="mt-3 rounded-[10px] border border-black/5 bg-white/65 p-2.5">
+          <div className="font-mono text-[12px] font-semibold text-ink">{loadedTable} · {loadedRows ?? 0} rows</div>
+          {!!schema.length && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {schema.map((column) => (
+                <span key={column.name} className="rounded bg-surface-muted px-1.5 py-0.5 font-mono text-[10.5px] text-ink-secondary">
+                  {column.name}:{column.type}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      <div className="mt-3 flex flex-col gap-2">
+        {DEFAULT_VOCAB_SOURCES.map((source, index) => (
+          <label key={source.label} className="flex flex-col gap-1">
+            <span className="font-mono text-[10.5px] text-ink-tertiary">{source.label} raw URL</span>
+            <input
+              value={urls[index]}
+              onChange={(event) => setUrls((next) => next.map((url, i) => (i === index ? event.target.value : url)))}
+              className="rounded-md border border-border bg-white/80 px-2.5 py-2 font-mono text-[11px] text-ink outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
+            />
+          </label>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void importVocabulary()}
+          disabled={busy}
+          className="inline-flex h-8 items-center gap-1.5 rounded-[9px] bg-primary px-3 text-[12px] font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+        >
+          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+          Import vocabulary URLs
+        </button>
+        {message && <span className="text-[12px] text-live">{message}</span>}
+        {error && <span className="text-[12px] text-amber-700">{error}</span>}
+      </div>
+    </div>
+  )
+}
+
 /* ──────────────── Surfaces ──────────────── */
 
 function SurfacesColumn({
@@ -1840,6 +2020,17 @@ function SkillPanel({
                   </>
                 )}
                 {skill?.platformSkillId === 'database' && <DatabaseSkillDiagnostics appId={appId} />}
+                {skill?.platformSkillId === 'dataset_library' && (
+                  <DatasetSkillLoader
+                    appId={appId}
+                    skill={skill}
+                    onUpdate={(partial) =>
+                      onUpdateFlow({
+                        skills: (miniapp.skills ?? []).map((s) => (s.id === skill.id ? { ...s, ...partial } : s)),
+                      })
+                    }
+                  />
+                )}
               </>
             )}
           </div>
@@ -1853,17 +2044,31 @@ function SkillPanel({
           />
 
           {/* Right: AI chat */}
-          <div className="flex min-h-0 shrink-0 flex-col" style={{ width: rightW }}>
+          <div className="flex min-h-0 min-w-0 shrink-0 flex-col" style={{ width: rightW, maxWidth: 'calc(100% - 120px)' }}>
             <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
               {chat.map((m, i) =>
                 m.role === 'ai' ? (
                   <div key={i} className="flex items-start gap-2">
                     <Avatar sm />
-                    <div className="rounded-[14px] rounded-bl-[4px] bg-surface-muted px-3 py-2 text-[13px] leading-snug text-ink">{m.text}</div>
+                    <div className="min-w-0 max-w-[92%] rounded-[14px] rounded-bl-[4px] bg-surface-muted px-3 py-2 text-[13px] leading-snug text-ink">
+                      <ErrorBoundary
+                        resetKey={`skill-chat-${i}:${m.text}`}
+                        fallback={(error) => (
+                          <div className="space-y-2">
+                            <div className="rounded-[10px] border border-amber-500/20 bg-amber-500/10 px-2.5 py-2 text-[11.5px] text-amber-700">
+                              Message markdown failed to render: {error.message}
+                            </div>
+                            <pre className="whitespace-pre-wrap break-words font-sans text-[13px] leading-snug text-ink">{m.text}</pre>
+                          </div>
+                        )}
+                      >
+                        <MessageResponse className="overflow-hidden break-words text-[13px] leading-snug">{m.text}</MessageResponse>
+                      </ErrorBoundary>
+                    </div>
                   </div>
                 ) : (
                   <div key={i} className="flex justify-end">
-                    <div className="rounded-[14px] rounded-br-[4px] bg-primary px-3 py-2 text-[13px] leading-snug text-primary-foreground">{m.text}</div>
+                    <div className="min-w-0 max-w-[92%] whitespace-pre-wrap break-words rounded-[14px] rounded-br-[4px] bg-primary px-3 py-2 text-[13px] leading-snug text-primary-foreground">{m.text}</div>
                   </div>
                 ),
               )}
@@ -1878,19 +2083,19 @@ function SkillPanel({
                 </div>
               )}
             </div>
-            <div className="border-t border-black/5 p-3">
-              <div className="flex items-center gap-2 rounded-full border border-border-strong bg-white/80 py-1.5 pl-3.5 pr-1.5">
+            <div className="min-w-0 border-t border-black/5 p-3">
+              <div className="flex min-w-0 max-w-full items-center gap-2 rounded-full border border-border-strong bg-white/80 py-1.5 pl-3.5 pr-1.5">
                 <input
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') void sendChat() }}
                   placeholder="Ask or instruct…"
-                  className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-tertiary"
+                  className="min-w-0 flex-1 overflow-hidden bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-tertiary"
                 />
                 <button
                   onClick={() => void sendChat()}
                   disabled={chatBusy || !input.trim()}
-                  className="flex size-7 items-center justify-center rounded-full bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40"
+                  className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40"
                   aria-label="Send"
                 >
                   <ArrowUp className="size-[15px]" />
@@ -1959,13 +2164,16 @@ function ToolCallCard({
 }) {
   const [running, setRunning] = useState(false)
   const [out, setOut] = useState<{ ok: boolean; result?: unknown; error?: string } | null>(null)
+  const [inputText, setInputText] = useState('{}')
   const params = ((tool.parameters as { properties?: Record<string, unknown> } | undefined)?.properties) ?? {}
   const canTest = !!(tool.builtin || tool.entry)
   const run = async () => {
     setRunning(true)
     setOut(null)
     try {
-      setOut(await testSkillTool(appId, skillId, tool.name))
+      const input = inputText.trim() ? JSON.parse(inputText) : {}
+      if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Input must be a JSON object.')
+      setOut(await testSkillTool(appId, skillId, tool.name, input as Record<string, unknown>))
     } catch (e) {
       setOut({ ok: false, error: String((e as Error)?.message ?? e) })
     } finally {
@@ -2003,10 +2211,19 @@ function ToolCallCard({
               ))}
             </div>
           )}
+          {canTest && (
+            <textarea
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              spellCheck={false}
+              className="min-h-20 resize-y rounded-md border border-border bg-surface px-2.5 py-2 font-mono text-[11px] leading-relaxed text-ink outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
+              placeholder='{"path": "/health"}'
+            />
+          )}
           {out && (
             <pre
               className={cn(
-                'max-h-32 overflow-auto rounded-md border p-2 font-mono text-[11px] leading-relaxed',
+                'max-h-60 overflow-auto rounded-md border p-2 font-mono text-[11px] leading-relaxed',
                 out.ok ? 'border-live/40 bg-live-soft/50 text-ink' : 'border-amber-300/60 bg-amber-50 text-ink',
               )}
             >

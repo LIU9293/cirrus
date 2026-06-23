@@ -14,12 +14,14 @@ import {
   parseAppFrameCanvasScreenshotMessage,
   frameActionFailure,
 } from '@shared/bridge'
-import { postAction } from './api'
+import { postAction, postPublicAction } from './api'
 import type { CanvasElementSelection, MiniappRecord } from '@shared/protocol'
 
 export interface HostEvents {
   /** Runtime context when the iframe is hosted inside a runtime window. */
   runtimeId?: string
+  /** Route actions through the public, no-auth endpoint (shared /r/:id page). */
+  publicRuntime?: boolean
   /** Called whenever the host-owned state advances (after an action). */
   onState?: (state: Record<string, unknown>, version: number) => void
   /** Called with an agent/action message to surface in the UI. */
@@ -179,7 +181,10 @@ export function useMiniappHost(
       const target = win()
       if (!target) return
       try {
-        const outcome = await postAction(frame.boxId, action.actionId, action.payload, eventsRef.current.runtimeId)
+        const ev = eventsRef.current
+        const outcome = ev.publicRuntime && ev.runtimeId
+          ? await postPublicAction(ev.runtimeId, frame.boxId, action.actionId, action.payload)
+          : await postAction(frame.boxId, action.actionId, action.payload, ev.runtimeId)
         stateRef.current = { state: outcome.state, version: outcome.stateVersion }
         // Push new state first, then resolve the action so the frame's await sees it.
         pushState()

@@ -469,9 +469,24 @@ export interface PublicRuntime {
   agents: { key: string; name: string; source: 'own' | 'community' }[]
 }
 
-export async function getPublicRuntime(id: string): Promise<PublicRuntime> {
-  const data = await json<{ runtime: PublicRuntime }>(await fetch(`/api/public/runtimes/${id}`))
-  return data.runtime
+export interface PublicRuntimeData {
+  runtime: PublicRuntime
+  /** The runtime's built miniapp, if any (so the public page can show it). */
+  miniapp: MiniappRecord | null
+}
+
+export async function getPublicRuntime(id: string): Promise<PublicRuntimeData> {
+  return json<PublicRuntimeData>(await fetch(`/api/public/runtimes/${id}`))
+}
+
+export async function postPublicAction(runtimeId: string, miniappId: string, actionId: string, payload: unknown): Promise<ActionOutcome> {
+  return json<ActionOutcome>(
+    await fetch(`/api/public/runtimes/${encodeURIComponent(runtimeId)}/miniapps/${encodeURIComponent(miniappId)}/actions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actionId, payload }),
+    }),
+  )
 }
 
 export async function* streamPublicRuntimeChat(id: string, history: ChatTurn[], signal?: AbortSignal): AsyncGenerator<AgentEvent> {

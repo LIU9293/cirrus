@@ -99,7 +99,28 @@ app.get('/api/health', async (_req, res) => {
 app.get('/api/public/runtimes/:id', async (req, res) => {
   const runtime = await loadRuntime(req.params.id)
   if (!runtime) return res.status(404).json({ error: 'not found' })
-  res.json({ runtime: { id: runtime.id, name: runtime.name, agents: runtime.agents.map((a) => ({ key: a.key, name: a.name, source: a.source })) } })
+  // Expose the first built own-agent miniapp (if any) so the public page can show it.
+  let miniapp: { id: string; html: string; state: Record<string, unknown>; stateVersion: number; manifest: MiniappRecord['manifest'] } | null = null
+  const ownAgent = runtime.agents.find((a) => a.source === 'own' && a.miniappId)
+  if (ownAgent?.miniappId) {
+    const rec = await loadRecord(ownAgent.miniappId)
+    if (rec?.html) miniapp = { id: rec.id, html: rec.html, state: rec.state ?? {}, stateVersion: rec.stateVersion ?? 0, manifest: rec.manifest }
+  }
+  res.json({ runtime: { id: runtime.id, name: runtime.name, agents: runtime.agents.map((a) => ({ key: a.key, name: a.name, source: a.source })) }, miniapp })
+})
+
+// Public miniapp actions (state updates + agent actions) for the shared page.
+app.post('/api/public/runtimes/:id/miniapps/:miniappId/actions', async (req, res) => {
+  const runtime = await loadRuntime(req.params.id)
+  if (!runtime) return res.status(404).json({ error: 'runtime not found' })
+  if (!runtime.agents.some((agent) => agent.source === 'own' && agent.miniappId === req.params.miniappId)) {
+    return res.status(403).json({ error: 'miniapp is not attached to this runtime' })
+  }
+  const record = await loadRecord(req.params.miniappId)
+  if (!record) return res.status(404).json({ error: 'miniapp not found' })
+  const actionId = String(req.body?.actionId ?? '')
+  const payload = { ...(isPlainObject(req.body?.payload) ? req.body.payload : {}), runtimeId: runtime.id, sandboxId: runtime.sandboxId }
+  res.json(await runMiniappHostAction(record, actionId, payload))
 })
 
 app.post('/api/public/runtimes/:id/chat', async (req, res) => {
