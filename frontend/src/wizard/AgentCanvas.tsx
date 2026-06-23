@@ -148,15 +148,15 @@ interface Props {
 
 const PHASES: { key: CreationPhase; label: string }[] = [
   { key: 'define', label: 'Define' },
-  { key: 'skills', label: 'Agent' },
+  { key: 'skills', label: 'Skill' },
   { key: 'surface', label: 'Surface' },
-  { key: 'publish', label: 'Review' },
 ]
 
 export function AgentCanvas({ miniapp, onUpdateFlow, onNavigate, onNavStateChange, onBuild, buildMessages, building, canvasRef, onState, onLiveSend, liveMessages, liveStreaming, selectingElement, selectedElement, onToggleElementSelect, onElementSelected, onClearSelection }: Props) {
-  // A finished ('done') agent has cleared every step, so reopening it lands on
-  // the last column (Review) with the full track visible.
-  const phase = (miniapp.creationPhase === 'done' ? 'publish' : (miniapp.creationPhase ?? 'define')) as CreationPhase
+  // A finished ('done') agent — and legacy 'publish' records — land on the last
+  // column (Surface) with the full track visible.
+  const raw = miniapp.creationPhase ?? 'define'
+  const phase = (raw === 'done' || raw === 'publish' ? 'surface' : raw) as CreationPhase
   // `reached` = furthest step (from creationPhase). Columns exist up to it and
   // never disappear. `focus` = which column the camera centers on; navigating
   // back via the navbar only pans the canvas, it doesn't change progress.
@@ -332,18 +332,13 @@ export function AgentCanvas({ miniapp, onUpdateFlow, onNavigate, onNavStateChang
             {key === 'surface' && (
               <SurfacesColumn
                 active={key === reachedKey}
-                hasMiniApp={!!miniapp.html}
-                onContinue={() => advance()}
-                onViewMiniApp={(r) => openPanel('miniapp', r)}
-              />
-            )}
-            {key === 'publish' && (
-              <ReviewColumn
                 miniapp={miniapp}
+                hasMiniApp={!!miniapp.html}
                 onFinish={() => {
                   goTo('done')
                   onNavigate('agents')
                 }}
+                onViewMiniApp={(r) => openPanel('miniapp', r)}
               />
             )}
           </div>
@@ -1063,15 +1058,18 @@ function DatabaseSkillDiagnostics({ appId }: { appId: string }) {
 
 function SurfacesColumn({
   active,
+  miniapp,
   hasMiniApp,
-  onContinue,
+  onFinish,
   onViewMiniApp,
 }: {
   active: boolean
+  miniapp: MiniappRecord
   hasMiniApp: boolean
-  onContinue: () => void
+  onFinish: () => void
   onViewMiniApp: (rect: DOMRect) => void
 }) {
+  const hasCreated = miniapp.creationPhase === 'done'
   const [open, setOpen] = useState(false)
   const addRef = useRef<HTMLDivElement>(null)
   const OPTS: { icon: React.ReactNode; name: string; sub: string; disabled: boolean; onSelect?: (r: DOMRect) => void }[] = [
@@ -1138,10 +1136,10 @@ function SurfacesColumn({
             </button>
             {active && (
               <button
-                onClick={onContinue}
+                onClick={onFinish}
                 className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-[11px] bg-primary px-4 py-2.5 text-[13px] font-semibold text-primary-foreground hover:opacity-90"
               >
-                Complete &amp; Next <ArrowRight className="size-[15px]" />
+                {hasCreated ? 'Save & Update' : 'Create agent'} <ArrowRight className="size-[15px]" />
               </button>
             )}
           </div>
@@ -1171,49 +1169,6 @@ function SurfacesColumn({
             </div>
           )}
         </div>
-    </div>
-  )
-}
-
-/* ──────────────── Review ──────────────── */
-
-function ReviewColumn({ miniapp, onFinish }: { miniapp: MiniappRecord; onFinish: () => void }) {
-  const name = miniapp.draft?.name ?? miniapp.manifest?.name ?? 'Agent'
-  const hasCreated = miniapp.creationPhase === 'done'
-  const skills = miniapp.skills ?? []
-  // Credentials are configured per-runtime, so they no longer gate creation.
-  const ready = true
-  const hasMiniApp = !!miniapp.html
-  return (
-    <div className="flex w-[400px] flex-col gap-3">
-      <ColHeader>Review</ColHeader>
-      <div className="flex flex-col gap-4 rounded-[16px] border border-border bg-surface p-5 shadow-[0_8px_24px_-6px_rgba(25,25,23,0.07)]">
-        <div>
-          <div className="font-mono text-[10.5px] tracking-[0.12em] text-ink-tertiary">{ready ? 'READY TO CREATE' : 'NEEDS CONFIGURATION'}</div>
-          <div className="mt-1 text-[18px] font-bold tracking-tight text-ink">{name}</div>
-        </div>
-        <div className="flex flex-col gap-2 text-[13px] text-ink">
-          <Row icon={<Check className="size-4 text-live" />} text={`${skills.length}/${skills.length} capabilities ready`} />
-          <Row icon={<MessageSquare className="size-4 text-ink-secondary" />} text="Chat surface enabled" />
-          {hasMiniApp && <Row icon={<AppWindow className="size-4 text-accent-ink" />} text="Mini App surface enabled" />}
-        </div>
-        <button
-          onClick={onFinish}
-          disabled={!ready}
-          className="inline-flex items-center justify-center gap-1.5 rounded-[11px] bg-primary px-4 py-2.5 text-[13.5px] font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-40"
-        >
-          {hasCreated ? 'Save & Update' : 'Create agent'} <ArrowRight className="size-[15px]" />
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function Row({ icon, text }: { icon: React.ReactNode; text: string }) {
-  return (
-    <div className="flex items-center gap-2.5">
-      {icon}
-      <span>{text}</span>
     </div>
   )
 }
