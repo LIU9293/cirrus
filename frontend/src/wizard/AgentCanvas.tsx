@@ -2356,7 +2356,7 @@ export function CommunityPage({ onNavigate }: { onNavigate: (v: NavView) => void
           <h1 className="text-[28px] font-bold tracking-tight text-ink">Community Agents</h1>
           <p className="mt-1.5 text-[13.5px] text-ink-secondary">Agents shared by the community — open one to explore or fork.</p>
         </div>
-        <div className="flex items-start gap-4">
+        <div className="mt-6 flex items-start gap-4 sm:mt-7">
           {columns.map((colItems, ci) => (
             <div key={ci} className="flex min-w-0 flex-1 flex-col gap-4">
               {colItems.map((a) => (
@@ -3820,10 +3820,30 @@ function CronPanel({ runtimeId, runtime, compact }: { runtimeId: string; runtime
     }
   }
 
+  // Draggable split between the jobs list (left, flexible) and the chat (right).
+  // The chat defaults small; drag the divider to widen it.
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [chatW, setChatW] = useState(330)
+  const dragRef = useRef<{ sx: number; sw: number } | null>(null)
+  const onSplitDown = (e: React.PointerEvent) => {
+    if (compact) return
+    e.stopPropagation()
+    dragRef.current = { sx: e.clientX, sw: chatW }
+    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+  }
+  const onSplitMove = (e: React.PointerEvent) => {
+    const d = dragRef.current
+    if (!d) return
+    const total = containerRef.current?.getBoundingClientRect().width ?? 800
+    const maxChat = Math.max(280, total - 300)
+    setChatW(Math.max(280, Math.min(maxChat, d.sw - (e.clientX - d.sx))))
+  }
+  const onSplitUp = () => { dragRef.current = null }
+
   return (
-    <div className={cn('flex min-h-0 flex-1', compact ? 'flex-col' : 'flex-row')}>
+    <div ref={containerRef} className={cn('flex min-h-0 flex-1', compact ? 'flex-col' : 'flex-row')}>
       {/* Left: configured jobs */}
-      <div className={cn('flex min-h-0 flex-col overflow-auto p-4', compact ? 'max-h-[45%] border-b border-black/5' : 'w-[320px] shrink-0 border-r border-black/5')}>
+      <div className={cn('flex min-h-0 flex-col overflow-auto p-4', compact ? 'max-h-[45%] border-b border-black/5' : 'min-w-0 flex-1')}>
         <div className="flex items-center justify-between">
           <div className="font-mono text-[10.5px] tracking-[0.12em] text-ink-tertiary">SCHEDULED TASKS</div>
           {jobs && jobs.length > 0 && <span className="text-[11px] text-ink-tertiary">{jobs.length}</span>}
@@ -3847,8 +3867,20 @@ function CronPanel({ runtimeId, runtime, compact }: { runtimeId: string; runtime
           </div>
         )}
       </div>
+      {!compact && (
+        <div
+          onPointerDown={onSplitDown}
+          onPointerMove={onSplitMove}
+          onPointerUp={onSplitUp}
+          className="w-1.5 shrink-0 cursor-col-resize bg-black/5 transition-colors hover:bg-primary/40"
+          aria-label="Resize chat"
+        />
+      )}
       {/* Right: scheduling assistant chat */}
-      <div className="flex min-h-0 min-w-0 flex-1">
+      <div
+        className={cn('flex min-h-0 min-w-0', compact ? 'flex-1' : 'shrink-0')}
+        style={compact ? undefined : { width: chatW }}
+      >
         <BuildChat
           title=""
           placeholder="e.g. every weekday at 9am, ask for a news digest"
