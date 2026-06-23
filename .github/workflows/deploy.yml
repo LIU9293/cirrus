@@ -1,0 +1,32 @@
+name: Deploy to Railway
+
+# Auto-deploy the cirrus service whenever main is updated.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+concurrency:
+  group: railway-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Railway CLI
+        run: npm i -g @railway/cli
+
+      - name: Deploy to Railway
+        # RAILWAY_TOKEN is a *project* token (Railway dashboard → cirrus → Settings
+        # → Tokens, scoped to the production environment). Stored as a repo secret.
+        # `up --ci` uploads this checkout, builds the Dockerfile, and streams logs.
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --service cirrus --ci
