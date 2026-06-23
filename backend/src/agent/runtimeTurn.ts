@@ -129,9 +129,16 @@ export async function executeRuntimeTurn(
     activities = outcome.activities ?? []
     ui = outcome.ui
   } else if (selectedAgent?.source === 'community') {
-    const outcome = await runCirrusRuntimeCommunityChat(selectedAgent, history, { sandboxId, routing, agentSpecs, route })
+    const outcome = await runCirrusRuntimeCommunityChat(selectedAgent, history, {
+      sandboxId,
+      routing,
+      agentSpecs,
+      route,
+      platform: { runtimeId: runtime.id, ownerId: runtime.ownerId, agents: runtime.agents.map((a) => ({ key: a.key, name: a.name })) },
+    })
     message = outcome.message
     activities = outcome.activities ?? []
+    ui = outcome.ui
   } else if (runtime.agents.length > 0) {
     const outcome = await runCirrusRuntimeCoordinatorChat(history, { sandboxId, routing, agentSpecs, route })
     message = outcome.message

@@ -1,7 +1,28 @@
 import { config } from './config.ts'
 import { runInRuntimeSandbox } from './sandbox/runtimeSandbox.ts'
 import type { ChatTurn } from './agent/developerAgent.ts'
-import type { DeveloperChatActivity, RuntimeAgentRef, RuntimeAgentModelConfig } from '../../shared/protocol.ts'
+import type { RuntimeMessageUi } from './agent/skillTools.ts'
+import { createCronJob, deleteCronJob, listCronJobs, updateCronJob } from './cronStore.ts'
+import type { CronJob, DeveloperChatActivity, RuntimeAgentRef, RuntimeAgentModelConfig } from '../../shared/protocol.ts'
+
+/** Context the host gives the in-sandbox community adapter so it can use platform
+ *  tools (cron management, ask_user, send_image) for the right runtime. */
+export interface CommunityPlatformContext {
+  runtimeId: string
+  ownerId: string
+  agents: { key: string; name: string }[]
+}
+
+/** What the adapter records and the host applies after invoke() returns. */
+interface CronRequest {
+  op: 'create' | 'update' | 'delete'
+  id?: string
+  name?: string
+  schedule?: string
+  message?: string
+  targetAgentKey?: string | null
+  patch?: { name?: string; schedule?: string; message?: string; targetAgentKey?: string | null; enabled?: boolean }
+}
 
 export interface CommunityAgentDefinition {
   key: string
@@ -145,8 +166,14 @@ export async function invoke(payload) {
   const coding = agent.category === 'coding';
   const baseSystem = [
     agent.systemPrompt,
+    'You are running inside a Cirrus runtime and can act on the platform through these tools:',
+    '- ask_user(question, options:[{label,value}], allowFreeText): ask the user and show quick-reply buttons. After calling it, STOP and wait for their reply.',
+    '- send_image(url, alt): send an image to the user (http(s) or data:image URL).',
+    '- list_cron_jobs(): list this runtime\\'s scheduled tasks.',
+    '- create_cron_job(name, schedule, message, targetAgentKey?): schedule a recurring message to a runtime agent. schedule is a 5-field cron expression (e.g. "0 9 * * 1-5" = weekdays 09:00, server timezone).',
+    '- update_cron_job(id, ...fields), delete_cron_job(id): edit/remove a scheduled task.',
     coding ? [
-      'You are a coding agent running inside this runtime sandbox.',
+      'You are also a coding agent running inside this runtime sandbox.',
       'The runtime filesystem is isolated to this E2B sandbox. Use /home/user/cirrus/workspace as the default workspace for repositories.',
       'You have full coding tools for files and shell commands under /home/user/cirrus.',
       'Use read_file/write_file/list_dir/run_command to inspect, edit, run tests, use git, push branches, and verify work.',
@@ -157,16 +184,21 @@ export async function invoke(payload) {
     { role: 'system', content: baseSystem },
     ...(history || []).map((turn) => ({ role: turn.role, content: turn.content }))
   ];
-  const tools = coding ? codingTools() : undefined;
+  // Accumulates out-of-band UI (ask_user buttons, send_image) and deferred cron
+  // mutations; the host applies/propagates these after invoke() returns.
+  const acc = { ui: {}, cronRequests: [] };
+  const tools = [...platformTools(), ...(coding ? codingTools() : [])];
+  const done = (msg) => ({ ok: true, reply: msg, ui: acc.ui, cronRequests: acc.cronRequests });
 
-  for (let i = 0; i < (coding ? 14 : 1); i += 1) {
+  for (let i = 0; i < (coding ? 14 : 6); i += 1) {
     const res = await fetch(model.endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: 'Bearer ' + model.apiKey },
       body: JSON.stringify({
         model: model.id,
         messages,
-        ...(tools ? { tools, tool_choice: 'auto' } : {}),
+        tools,
+        tool_choice: 'auto',
         max_completion_tokens: coding ? 1800 : 1000,
       })
     });
@@ -175,13 +207,42 @@ export async function invoke(payload) {
     const msg = data?.choices?.[0]?.message ?? {};
     const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
     messages.push({ role: 'assistant', content: msg.content ?? '', ...(toolCalls.length ? { tool_calls: toolCalls } : {}) });
-    if (!toolCalls.length) return { ok: true, reply: msg.content ?? '' };
+    if (!toolCalls.length) return done(msg.content ?? '');
+    let asked = false;
     for (const call of toolCalls) {
-      const result = await runTool(call.function?.name, call.function?.arguments);
+      const result = await runTool(call.function?.name, call.function?.arguments, payload, acc);
+      if (call.function?.name === 'ask_user') asked = true;
       messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result).slice(0, 12000) });
     }
+    // ask_user ends the turn so the user can respond.
+    if (asked) return done(msg.content ?? '');
   }
-  return { ok: true, reply: 'Stopped after the maximum tool iterations.' };
+  return done('Stopped after the maximum tool iterations.');
+}
+
+function platformTools() {
+  const obj = (properties) => ({ type: 'object', properties });
+  return [
+    { type: 'function', function: { name: 'ask_user', description: 'Ask the user a question and show quick-reply buttons. options is [{label, value}]; value is sent when tapped (defaults to label). Set allowFreeText to also allow typing. After calling, STOP and wait for the reply.', parameters: obj({ question: { type: 'string' }, options: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, value: { type: 'string' } } } }, allowFreeText: { type: 'boolean' } }) } },
+    { type: 'function', function: { name: 'send_image', description: 'Send an image to the user. url is an http(s) or data:image URL; alt is an optional caption.', parameters: obj({ url: { type: 'string' }, alt: { type: 'string' } }) } },
+    { type: 'function', function: { name: 'list_cron_jobs', description: 'List the scheduled tasks (cron jobs) in this runtime.', parameters: obj({}) } },
+    { type: 'function', function: { name: 'create_cron_job', description: 'Schedule a recurring task: on the cron schedule, message is sent to a runtime agent. schedule is a 5-field cron expression. targetAgentKey is optional.', parameters: obj({ name: { type: 'string' }, schedule: { type: 'string' }, message: { type: 'string' }, targetAgentKey: { type: 'string' } }) } },
+    { type: 'function', function: { name: 'update_cron_job', description: 'Update a scheduled task by id. Include only fields to change; enabled=false pauses it.', parameters: obj({ id: { type: 'string' }, name: { type: 'string' }, schedule: { type: 'string' }, message: { type: 'string' }, targetAgentKey: { type: 'string' }, enabled: { type: 'boolean' } }) } },
+    { type: 'function', function: { name: 'delete_cron_job', description: 'Delete a scheduled task by id.', parameters: obj({ id: { type: 'string' } }) } },
+  ];
+}
+
+function validCron(expr) {
+  const parts = String(expr || '').trim().split(/\\s+/);
+  if (parts.length !== 5) return false;
+  const ranges = [[0,59],[0,23],[1,31],[1,12],[0,7]];
+  return parts.every((field, i) => field.split(',').every((tok) => {
+    const m = tok.match(/^(\\*|\\d+(?:-\\d+)?)(?:\\/(\\d+))?$/);
+    if (!m) return false;
+    if (m[1] === '*') return true;
+    const [lo, hi] = m[1].includes('-') ? m[1].split('-').map(Number) : [Number(m[1]), Number(m[1])];
+    return lo <= hi && lo >= ranges[i][0] && hi <= ranges[i][1];
+  }));
 }
 
 function codingTools() {
@@ -194,11 +255,49 @@ function codingTools() {
   ];
 }
 
-async function runTool(name, rawArgs) {
+async function runTool(name, rawArgs, payload, acc) {
+  const args = rawArgs ? JSON.parse(rawArgs) : {};
+  const platform = (payload && payload.platform) || {};
+
+  // ── Platform tools: recorded here, applied/propagated by the host ──
+  if (name === 'ask_user') {
+    const options = (Array.isArray(args.options) ? args.options : [])
+      .map((o) => ({ label: String((o && (o.label ?? o.value)) || '').trim(), value: String((o && (o.value ?? o.label)) || '') }))
+      .filter((o) => o.label);
+    acc.ui.choices = options;
+    acc.ui.allowFreeText = !!args.allowFreeText;
+    if (args.question) acc.ui.question = String(args.question);
+    return { ok: true, presented: { question: args.question, options, allowFreeText: !!args.allowFreeText }, note: 'Shown to the user. Stop and wait for their reply.' };
+  }
+  if (name === 'send_image') {
+    const url = String(args.url || '');
+    if (!/^(https?:\\/\\/|data:image\\/)/i.test(url)) return { ok: false, error: 'url must be an http(s) or data:image URL' };
+    acc.ui.images = [...(acc.ui.images || []), { url, alt: args.alt ? String(args.alt) : undefined }];
+    return { ok: true, sent: { url } };
+  }
+  if (name === 'list_cron_jobs') return { ok: true, jobs: platform.cronJobs || [] };
+  if (name === 'create_cron_job') {
+    const schedule = String(args.schedule || '');
+    if (!validCron(schedule)) return { ok: false, error: 'Invalid cron schedule "' + schedule + '"' };
+    if (!String(args.message || '').trim()) return { ok: false, error: 'message is required' };
+    const key = args.targetAgentKey ? String(args.targetAgentKey) : null;
+    if (key && !(platform.agents || []).some((a) => a.key === key)) return { ok: false, error: 'Unknown agent key "' + key + '"' };
+    acc.cronRequests.push({ op: 'create', name: String(args.name || ''), schedule, message: String(args.message || ''), targetAgentKey: key });
+    return { ok: true, scheduled: { name: args.name, schedule, targetAgentKey: key }, note: 'Will be created when you finish.' };
+  }
+  if (name === 'update_cron_job') {
+    if (args.schedule !== undefined && !validCron(String(args.schedule))) return { ok: false, error: 'Invalid cron schedule' };
+    acc.cronRequests.push({ op: 'update', id: String(args.id || ''), patch: { name: args.name, schedule: args.schedule, message: args.message, targetAgentKey: args.targetAgentKey, enabled: args.enabled } });
+    return { ok: true, updated: String(args.id || '') };
+  }
+  if (name === 'delete_cron_job') {
+    acc.cronRequests.push({ op: 'delete', id: String(args.id || '') });
+    return { ok: true, deleted: String(args.id || '') };
+  }
+
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
   const cp = await import('node:child_process');
-  const args = rawArgs ? JSON.parse(rawArgs) : {};
   const root = '/home/user/cirrus';
   const safe = (input = '.') => {
     const abs = path.resolve(root, String(input || '.').replace(/^\\/home\\/user\\/cirrus\\/?/, ''));
@@ -274,7 +373,11 @@ function installCode(definition: CommunityAgentDefinition): string {
   ].join('\n')
 }
 
-function invokeCode(definition: CommunityAgentDefinition, history: ChatTurn[]): string {
+function invokeCode(
+  definition: CommunityAgentDefinition,
+  history: ChatTurn[],
+  platform?: CommunityPlatformContext & { cronJobs: CronJob[] },
+): string {
   const dir = `/home/user/cirrus/agents/${agentDirName(definition.key)}`
   const endpoint = config.baseURL.replace(/\/$/, '') + '/chat/completions'
   const payload = {
@@ -296,6 +399,11 @@ function invokeCode(definition: CommunityAgentDefinition, history: ChatTurn[]): 
       ].join('\n'),
     },
     history,
+    // Lets the adapter validate agent keys and read current schedules for the
+    // platform cron tools. Side-effects are applied host-side after invoke().
+    platform: platform
+      ? { agents: platform.agents, cronJobs: platform.cronJobs.map((j) => ({ id: j.id, name: j.name, schedule: j.schedule, message: j.message, targetAgentKey: j.targetAgentKey ?? null, enabled: j.enabled })) }
+      : { agents: [], cronJobs: [] },
   }
   return [
     `await (async () => {`,
@@ -357,11 +465,42 @@ export async function installCommunityAgentInSandbox(sandboxId: string, agent: R
   }
 }
 
+/** Apply the cron mutations the adapter requested, host-side via cronStore.
+ *  Returns one activity line per applied request. */
+async function applyCronRequests(ctx: CommunityPlatformContext, requests: CronRequest[]): Promise<DeveloperChatActivity[]> {
+  const out: DeveloperChatActivity[] = []
+  for (const r of requests.slice(0, 20)) {
+    try {
+      if (r.op === 'create') {
+        const job = await createCronJob({
+          runtimeId: ctx.runtimeId,
+          ownerId: ctx.ownerId,
+          name: r.name ?? '',
+          schedule: r.schedule ?? '',
+          message: r.message ?? '',
+          targetAgentKey: r.targetAgentKey ?? null,
+        })
+        out.push({ kind: 'tool', text: `Scheduled "${job.name || job.schedule}" (${job.schedule})` })
+      } else if (r.op === 'update' && r.id) {
+        await updateCronJob(r.id, r.patch ?? {})
+        out.push({ kind: 'tool', text: `Updated cron job ${r.id}` })
+      } else if (r.op === 'delete' && r.id) {
+        await deleteCronJob(r.id)
+        out.push({ kind: 'tool', text: `Deleted cron job ${r.id}` })
+      }
+    } catch (err) {
+      out.push({ kind: 'error', text: `Cron ${r.op} failed: ${String((err as Error)?.message ?? err)}`, ok: false })
+    }
+  }
+  return out
+}
+
 export async function invokeInstalledCommunityAgent(
   sandboxId: string,
   agent: RuntimeAgentRef,
   history: ChatTurn[],
-): Promise<{ ok: boolean; message: string; activities: DeveloperChatActivity[] }> {
+  platform?: CommunityPlatformContext,
+): Promise<{ ok: boolean; message: string; activities: DeveloperChatActivity[]; ui?: RuntimeMessageUi }> {
   const definition = communityAgentDefinition(agent.key)
   const activities: DeveloperChatActivity[] = []
   if (!definition) {
@@ -383,20 +522,25 @@ export async function invokeInstalledCommunityAgent(
     }
   }
   activities.push({ kind: 'status', text: `Invoking installed ${definition.name} adapter in E2B sandbox` })
-  const out = await runInRuntimeSandbox(sandboxId, invokeCode(definition, history), { timeoutMs: 90_000 })
+  const cronJobs = platform ? await listCronJobs(platform.runtimeId) : []
+  const code = invokeCode(definition, history, platform ? { ...platform, cronJobs } : undefined)
+  const out = await runInRuntimeSandbox(sandboxId, code, { timeoutMs: 90_000 })
   if (!out.ok) {
     const error = out.error ?? (out.stderr || 'Community agent invocation failed.')
     return { ok: false, message: `${definition.name} failed: ${error}`, activities: [...activities, { kind: 'error', text: error, ok: false }] }
   }
   const line = out.stdout.trim().split('\n').filter(Boolean).pop() ?? ''
   try {
-    const parsed = JSON.parse(line) as { ok: boolean; reply?: string; error?: string; host?: string; dir?: string }
+    const parsed = JSON.parse(line) as { ok: boolean; reply?: string; error?: string; host?: string; dir?: string; ui?: RuntimeMessageUi; cronRequests?: CronRequest[] }
     if (parsed.host) activities.push({ kind: 'status', text: `Sandbox host: ${parsed.host}` })
     if (parsed.dir) activities.push({ kind: 'status', text: `Installed adapter: ${parsed.dir}` })
     if (!parsed.ok) {
       return { ok: false, message: `${definition.name} failed: ${parsed.error ?? 'unknown error'}`, activities: [...activities, { kind: 'error', text: parsed.error ?? 'Invocation failed', ok: false }] }
     }
-    return { ok: true, message: parsed.reply || '(no reply)', activities }
+    // Apply the platform side-effects the adapter requested.
+    if (platform && parsed.cronRequests?.length) activities.push(...(await applyCronRequests(platform, parsed.cronRequests)))
+    const ui = parsed.ui && (parsed.ui.choices?.length || parsed.ui.images?.length) ? parsed.ui : undefined
+    return { ok: true, message: parsed.reply || (ui?.question ?? '(no reply)'), activities, ui }
   } catch {
     return {
       ok: false,

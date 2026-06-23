@@ -1,7 +1,7 @@
 import type { ActionSpec, DeveloperChatActivity, MiniappRecord, RuntimeAgentRef } from '../../../shared/protocol.ts'
 import type { ChatTurn } from './developerAgent.ts'
 import { runAgentInSandbox } from './sandboxAgent.ts'
-import { invokeInstalledCommunityAgent } from '../communityAgents.ts'
+import { invokeInstalledCommunityAgent, type CommunityPlatformContext } from '../communityAgents.ts'
 import {
   runRuntimeAction,
   runRuntimeChat,
@@ -340,7 +340,7 @@ export async function runCirrusRuntimeCoordinatorChat(
 export async function runCirrusRuntimeCommunityChat(
   agent: RuntimeAgentRef,
   history: ChatTurn[],
-  opts: { sandboxId?: string | null; routing: CirrusRuntimeRoutingDecision; agentSpecs: CirrusRuntimeAgentSpec[]; route: CirrusRuntimeRoute },
+  opts: { sandboxId?: string | null; routing: CirrusRuntimeRoutingDecision; agentSpecs: CirrusRuntimeAgentSpec[]; route: CirrusRuntimeRoute; platform?: CommunityPlatformContext },
 ): Promise<CirrusRuntimeChatOutcome> {
   const activities: DeveloperChatActivity[] = [
     { kind: 'status', text: `CirrusRuntimeAgent routing: ${opts.routing.mode}` },
@@ -357,7 +357,7 @@ export async function runCirrusRuntimeCommunityChat(
       stateVersion: 0,
     }
   }
-  const out = await invokeInstalledCommunityAgent(opts.sandboxId, agent, history)
+  const out = await invokeInstalledCommunityAgent(opts.sandboxId, agent, history, opts.platform)
   if (!out.ok) return { ok: false, patched: false, message: out.message, activities: [...activities, ...out.activities], state: {}, stateVersion: 0 }
   return {
     ok: true,
@@ -367,6 +367,7 @@ export async function runCirrusRuntimeCommunityChat(
       ...activities,
       ...out.activities,
     ],
+    ui: out.ui,
     state: {},
     stateVersion: 0,
   }
