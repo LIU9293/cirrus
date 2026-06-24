@@ -134,8 +134,9 @@ app.post('/api/public/runtimes/:id/chat', async (req, res) => {
   emit({ type: 'status', text: 'Working with CirrusRuntimeAgent…' })
   try {
     const history = (req.body?.history ?? []) as ChatTurn[]
-    const { message, activities, durationMs, ui } = await executeRuntimeTurn(runtime, history, { persist: false })
+    const { message, activities, durationMs, ui, posts } = await executeRuntimeTurn(runtime, history, { persist: false })
     for (const activity of activities) emit(activityToEvent(activity))
+    for (const post of posts ?? []) emit({ type: 'message', text: post })
     for (const chunk of assistantChunks(message)) emit({ type: 'assistant', text: chunk })
     for (const image of ui?.images ?? []) emit({ type: 'image', url: image.url, alt: image.alt })
     if (ui?.choices?.length) emit({ type: 'choices', choices: ui.choices, allowFreeText: ui.allowFreeText })
@@ -789,10 +790,11 @@ app.post('/api/runtimes/:id/chat', async (req, res) => {
   }
 
   const history = (req.body?.history ?? []) as ChatTurn[]
-  const { message, activities, durationMs, ui } = await executeRuntimeTurn(runtime, history, { persist: true })
+  const { message, activities, durationMs, ui, posts } = await executeRuntimeTurn(runtime, history, { persist: true })
 
   if (wantsStream) {
     for (const activity of activities) emit(activityToEvent(activity))
+    for (const post of posts ?? []) emit({ type: 'message', text: post })
     for (const chunk of assistantChunks(message)) emit({ type: 'assistant', text: chunk })
     for (const image of ui?.images ?? []) emit({ type: 'image', url: image.url, alt: image.alt })
     if (ui?.choices?.length) emit({ type: 'choices', choices: ui.choices, allowFreeText: ui.allowFreeText })
@@ -802,7 +804,7 @@ app.post('/api/runtimes/:id/chat', async (req, res) => {
     return
   }
 
-  res.json({ ok: true, message, activities, durationMs, choices: ui?.choices, allowFreeText: ui?.allowFreeText, images: ui?.images })
+  res.json({ ok: true, message, activities, durationMs, posts, choices: ui?.choices, allowFreeText: ui?.allowFreeText, images: ui?.images })
 })
 
 // ── Cron jobs: scheduled tasks that message a runtime agent on a schedule ──

@@ -64,6 +64,8 @@ export interface RuntimeTurnResult {
   durationMs: number
   /** ask_user buttons / send_image attachments the agent produced this turn. */
   ui?: RuntimeMessageUi
+  /** Standalone messages the agent posted mid-turn via post_message, in order. */
+  posts?: string[]
 }
 
 export interface RuntimeTurnOptions {
@@ -121,6 +123,7 @@ export async function executeRuntimeTurn(
   let message: string
   let activities: Activities = []
   let ui: RuntimeMessageUi | undefined
+  let posts: string[] | undefined
   if (selectedRecord) {
     const outcome = await runCirrusRuntimeChat(selectedRecord, history, {
       sandboxId,
@@ -143,6 +146,7 @@ export async function executeRuntimeTurn(
     message = outcome.message
     activities = outcome.activities ?? []
     ui = outcome.ui
+    posts = outcome.posts
   } else if (runtime.agents.length > 0) {
     const outcome = await runCirrusRuntimeCoordinatorChat(history, { sandboxId, routing, agentSpecs, route })
     message = outcome.message
@@ -164,6 +168,11 @@ export async function executeRuntimeTurn(
     if (userTurn?.role === 'user') {
       runtime.messages.push({ id: `${pre}m-` + now.toString(36), role: 'user', content: userTurn.content })
     }
+    // Standalone messages the agent posted mid-turn each become their own bubble,
+    // in order, ahead of the final reply.
+    posts?.forEach((text, i) => {
+      runtime.messages.push({ id: `${pre}p-${now.toString(36)}-${i}`, role: 'assistant', content: text })
+    })
     runtime.messages.push({
       id: `${pre}a-` + now.toString(36),
       role: 'assistant',
@@ -176,5 +185,5 @@ export async function executeRuntimeTurn(
     await saveRuntime(runtime)
   }
 
-  return { runtime, message, activities, durationMs, ui }
+  return { runtime, message, activities, durationMs, ui, posts }
 }

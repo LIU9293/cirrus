@@ -60,7 +60,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'framework',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.3.0',
+    version: '0.4.0',
     defaultModelConfig: platformModel(),
     capabilities: ['multi-agent coordination', 'workflow planning', 'handoff routing', 'status synthesis'],
     systemPrompt:
@@ -74,7 +74,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'framework',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.3.0',
+    version: '0.4.0',
     defaultModelConfig: platformModel(),
     capabilities: ['browser task planning', 'website automation planning', 'DOM/action reasoning'],
     systemPrompt:
@@ -88,7 +88,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'core',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.3.0',
+    version: '0.4.0',
     defaultModelConfig: platformModel(),
     capabilities: ['tool calling patterns', 'agent loop design', 'structured reasoning'],
     systemPrompt:
@@ -102,7 +102,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'coding',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.3.0',
+    version: '0.4.0',
     defaultModelConfig: subscriptionSkeleton('claude_code'),
     capabilities: ['codebase reasoning', 'patch planning', 'terminal workflow guidance'],
     systemPrompt:
@@ -116,7 +116,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'coding',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.3.0',
+    version: '0.4.0',
     defaultModelConfig: subscriptionSkeleton('codex'),
     capabilities: ['software engineering', 'repo inspection', 'implementation planning', 'test strategy'],
     systemPrompt:
@@ -130,7 +130,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'coding',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.3.0',
+    version: '0.4.0',
     defaultModelConfig: subscriptionSkeleton('opencode'),
     capabilities: ['coding workflows', 'CLI-oriented engineering guidance', 'open-source agent operations'],
     systemPrompt:
@@ -176,6 +176,7 @@ export async function invoke(payload) {
     agent.systemPrompt,
     'You are running inside a Cirrus runtime and can act on the platform through these tools:',
     '- ask_user(question, options:[{label,value}], allowFreeText): ask the user and show quick-reply buttons. After calling it, STOP and wait for their reply.',
+    '- post_message(text): proactively send a chat message to the user RIGHT NOW and KEEP WORKING (unlike ask_user, it does NOT end your turn). Use it for progress updates and intermediate findings during a long task; each call appears as its own chat message. Your final answer is whatever text you return at the end.',
     '- send_image(url, alt): send an image to the user (http(s) or data:image URL).',
     '- list_cron_jobs(): list this runtime\\'s scheduled tasks.',
     '- create_cron_job(name, schedule, message, targetAgentKey?): schedule a recurring message to a runtime agent. schedule is a 5-field cron expression (e.g. "0 9 * * 1-5" = weekdays 09:00, server timezone).',
@@ -195,9 +196,9 @@ export async function invoke(payload) {
   ];
   // Accumulates out-of-band UI (ask_user buttons, send_image) and deferred cron
   // mutations; the host applies/propagates these after invoke() returns.
-  const acc = { ui: {}, cronRequests: [] };
+  const acc = { ui: {}, cronRequests: [], posts: [] };
   const tools = [...platformTools(), ...(shell ? codingTools() : [])];
-  const done = (msg) => ({ ok: true, reply: msg, ui: acc.ui, cronRequests: acc.cronRequests });
+  const done = (msg) => ({ ok: true, reply: msg, ui: acc.ui, cronRequests: acc.cronRequests, posts: acc.posts });
 
   for (let i = 0; i < (shell ? 14 : 6); i += 1) {
     const res = await fetch(model.endpoint, {
@@ -233,6 +234,7 @@ function platformTools() {
   const obj = (properties) => ({ type: 'object', properties });
   return [
     { type: 'function', function: { name: 'ask_user', description: 'Ask the user a question and show quick-reply buttons. options is [{label, value}]; value is sent when tapped (defaults to label). Set allowFreeText to also allow typing. After calling, STOP and wait for the reply.', parameters: obj({ question: { type: 'string' }, options: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, value: { type: 'string' } } } }, allowFreeText: { type: 'boolean' } }) } },
+    { type: 'function', function: { name: 'post_message', description: 'Proactively send a chat message to the user now and keep working (does NOT end your turn). Use for progress updates and intermediate findings; each call is its own chat message.', parameters: obj({ text: { type: 'string' } }) } },
     { type: 'function', function: { name: 'send_image', description: 'Send an image to the user. url is an http(s) or data:image URL; alt is an optional caption.', parameters: obj({ url: { type: 'string' }, alt: { type: 'string' } }) } },
     { type: 'function', function: { name: 'list_cron_jobs', description: 'List the scheduled tasks (cron jobs) in this runtime.', parameters: obj({}) } },
     { type: 'function', function: { name: 'create_cron_job', description: 'Schedule a recurring task: on the cron schedule, message is sent to a runtime agent. schedule is a 5-field cron expression. targetAgentKey is optional.', parameters: obj({ name: { type: 'string' }, schedule: { type: 'string' }, message: { type: 'string' }, targetAgentKey: { type: 'string' } }) } },
@@ -277,6 +279,12 @@ async function runTool(name, rawArgs, payload, acc) {
     acc.ui.allowFreeText = !!args.allowFreeText;
     if (args.question) acc.ui.question = String(args.question);
     return { ok: true, presented: { question: args.question, options, allowFreeText: !!args.allowFreeText }, note: 'Shown to the user. Stop and wait for their reply.' };
+  }
+  if (name === 'post_message') {
+    const text = String(args.text || '').trim();
+    if (!text) return { ok: false, error: 'text is required' };
+    acc.posts.push(text);
+    return { ok: true, posted: true, note: 'Sent to the user. Keep working — do not repeat this in your final reply.' };
   }
   if (name === 'send_image') {
     const url = String(args.url || '');
@@ -510,7 +518,7 @@ export async function invokeInstalledCommunityAgent(
   agent: RuntimeAgentRef,
   history: ChatTurn[],
   platform?: CommunityPlatformContext,
-): Promise<{ ok: boolean; message: string; activities: DeveloperChatActivity[]; ui?: RuntimeMessageUi }> {
+): Promise<{ ok: boolean; message: string; activities: DeveloperChatActivity[]; ui?: RuntimeMessageUi; posts?: string[] }> {
   const definition = communityAgentDefinition(agent.key)
   const activities: DeveloperChatActivity[] = []
   if (!definition) {
@@ -541,7 +549,7 @@ export async function invokeInstalledCommunityAgent(
   }
   const line = out.stdout.trim().split('\n').filter(Boolean).pop() ?? ''
   try {
-    const parsed = JSON.parse(line) as { ok: boolean; reply?: string; error?: string; host?: string; dir?: string; ui?: RuntimeMessageUi; cronRequests?: CronRequest[] }
+    const parsed = JSON.parse(line) as { ok: boolean; reply?: string; error?: string; host?: string; dir?: string; ui?: RuntimeMessageUi; cronRequests?: CronRequest[]; posts?: string[] }
     if (parsed.host) activities.push({ kind: 'status', text: `Sandbox host: ${parsed.host}` })
     if (parsed.dir) activities.push({ kind: 'status', text: `Installed adapter: ${parsed.dir}` })
     if (!parsed.ok) {
@@ -550,7 +558,8 @@ export async function invokeInstalledCommunityAgent(
     // Apply the platform side-effects the adapter requested.
     if (platform && parsed.cronRequests?.length) activities.push(...(await applyCronRequests(platform, parsed.cronRequests)))
     const ui = parsed.ui && (parsed.ui.choices?.length || parsed.ui.images?.length) ? parsed.ui : undefined
-    return { ok: true, message: parsed.reply || (ui?.question ?? '(no reply)'), activities, ui }
+    const posts = Array.isArray(parsed.posts) ? parsed.posts.filter((p) => typeof p === 'string' && p.trim()) : []
+    return { ok: true, message: parsed.reply || (ui?.question ?? '(no reply)'), activities, ui, posts: posts.length ? posts : undefined }
   } catch {
     return {
       ok: false,

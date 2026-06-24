@@ -35,6 +35,7 @@ export type AgentEvent =
   | { type: 'tool_call'; name: string; summary: string }
   | { type: 'tool_result'; name: string; ok: boolean; detail?: string }
   | { type: 'assistant'; text: string }
+  | { type: 'message'; text: string }
   | { type: 'canvas_screenshot_request'; requestId: string }
   | { type: 'build'; ok: boolean; error?: string }
   | { type: 'record'; record: MiniappRecord }

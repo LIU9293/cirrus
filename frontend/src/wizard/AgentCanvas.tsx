@@ -3659,7 +3659,8 @@ function RuntimeWindow({
     setSending(true)
     try {
       for await (const ev of streamRuntimeChat(id, history)) {
-        setMessages((prev) => applyBuildChatEvent(prev, assistantId, ev))
+        if (ev.type === 'message') setMessages((prev) => insertPostedMessage(prev, assistantId, ev.text))
+        else setMessages((prev) => applyBuildChatEvent(prev, assistantId, ev))
       }
     } catch (err) {
       setMessages((prev) =>
@@ -5037,6 +5038,14 @@ function ConnectBotDialog({
 
 /* ───────── Mini App · build chat (Edit mode) ───────── */
 
+/** A standalone message the agent posted mid-turn (post_message) becomes its own
+ *  assistant bubble, inserted just before the still-streaming assistant bubble. */
+export function insertPostedMessage(messages: UiMessage[], beforeId: string, text: string): UiMessage[] {
+  const bubble: UiMessage = { id: `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, role: 'assistant', content: text }
+  const idx = messages.findIndex((m) => m.id === beforeId)
+  return idx < 0 ? [...messages, bubble] : [...messages.slice(0, idx), bubble, ...messages.slice(idx)]
+}
+
 export function applyBuildChatEvent(messages: UiMessage[], assistantId: string, ev: AgentEvent): UiMessage[] {
   return messages.map((m) => {
     if (m.id !== assistantId) return m
@@ -5062,6 +5071,9 @@ export function applyBuildChatEvent(messages: UiMessage[], assistantId: string, 
         return { ...m, activities }
       case 'assistant':
         return { ...m, content: `${m.content ?? ''}${ev.text}` }
+      case 'message':
+        // Fallback for consumers that don't split posts into their own bubble.
+        return { ...m, content: m.content ? `${m.content}\n\n${ev.text}` : ev.text }
       case 'image':
         return { ...m, images: [...(m.images ?? []), { url: ev.url, alt: ev.alt }] }
       case 'choices':

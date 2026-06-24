@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AppWindow } from 'lucide-react'
 import { getPublicRuntime, streamPublicRuntimeChat, type PublicRuntime, type ChatTurn } from '@/lib/api'
-import { BuildChat, applyBuildChatEvent } from '@/wizard/AgentCanvas'
+import { BuildChat, applyBuildChatEvent, insertPostedMessage } from '@/wizard/AgentCanvas'
 import { MiniappCanvas } from '@/canvas/MiniappCanvas'
 import type { UiMessage } from '@/chat/ChatPanel'
 import type { MiniappRecord, RuntimeAgentRef } from '@shared/protocol'
@@ -74,7 +74,8 @@ export function PublicRuntimeChat({ id }: { id: string }) {
     setSending(true)
     try {
       for await (const ev of streamPublicRuntimeChat(id, history)) {
-        setMessages((prev) => applyBuildChatEvent(prev, assistantId, ev))
+        if (ev.type === 'message') setMessages((prev) => insertPostedMessage(prev, assistantId, ev.text))
+        else setMessages((prev) => applyBuildChatEvent(prev, assistantId, ev))
       }
     } catch (err) {
       setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: String((err as Error)?.message ?? err), activities: [{ kind: 'error', text: 'Chat failed', ok: false }] } : m)))

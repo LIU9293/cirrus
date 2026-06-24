@@ -368,6 +368,7 @@ export async function runCirrusRuntimeCommunityChat(
       ...out.activities,
     ],
     ui: out.ui,
+    posts: out.posts,
     state: {},
     stateVersion: 0,
   }

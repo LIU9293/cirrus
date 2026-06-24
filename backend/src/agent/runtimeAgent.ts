@@ -77,6 +77,8 @@ export interface RuntimeChatOutcome extends RuntimeActionOutcome {
   activities?: DeveloperChatActivity[]
   /** Out-of-band UI the agent produced (ask_user buttons, send_image images). */
   ui?: RuntimeMessageUi
+  /** Standalone messages the agent posted mid-turn via post_message, in order. */
+  posts?: string[]
 }
 
 /** Run a pi-agent tool loop with the record's skill tools. Returns the final
