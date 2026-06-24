@@ -3798,10 +3798,10 @@ function RuntimeWindow({
       className={cn(
         'fixed cursor-default select-text',
         compactWindow
-          ? 'z-[120] inset-x-2 bottom-2 top-2'
+          ? 'z-[265] inset-x-2 bottom-2 top-2'
           : max
             ? 'z-[280] inset-5'
-            : 'z-[120] left-1/2 top-1/2',
+            : 'z-[265] left-1/2 top-1/2',
       )}
       style={compactWindow || max ? undefined : { width: size.w, transform: `translate(calc(-50% + ${d.x + stagger}px), calc(-50% + ${d.y + stagger}px))` }}
     >
