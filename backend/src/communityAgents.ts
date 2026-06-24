@@ -39,7 +39,7 @@ export interface CommunityAgentDefinition {
   /** When true, the in-sandbox adapter DRIVES the native CLI instead of running the
    *  platform-model tool loop. `cliDriver` picks which CLI driver to generate. */
   driveNativeCli?: boolean
-  cliDriver?: 'opencode' | 'openclaw' | 'hermes' | 'codex' | 'claude'
+  cliDriver?: 'opencode' | 'openclaw' | 'hermes' | 'codex' | 'claude' | 'pi'
   adapter: 'platform-llm-adapter'
   version: string
   defaultModelConfig: RuntimeAgentModelConfig
@@ -103,9 +103,11 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'core',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.6.0',
+    version: '0.7.0',
     defaultModelConfig: platformModel(),
     nativeCli: { install: 'npm i -g @mariozechner/pi-coding-agent', bin: 'pi' },
+    driveNativeCli: true,
+    cliDriver: 'pi',
     capabilities: ['tool calling patterns', 'agent loop design', 'structured reasoning'],
     systemPrompt:
       'You are Pi Agent, a compact tool-calling runtime agent. Emphasize structured tool contracts, minimal loops, and practical agent execution.',
@@ -646,12 +648,60 @@ export async function invoke(payload) {
 `
 }
 
+// Adapter that DRIVES the native `pi` CLI. Pi has no generic OpenAI-base-URL env, so
+// we write a custom provider into ~/.pi/agent/models.json (api: openai-completions,
+// pointed at the platform endpoint with the key + compat flags) and run
+// `pi -p "<prompt>" --provider cirrus --model <id> --mode text`, taking ANSI-stripped
+// stdout as the reply. MCP bridge for pi is a follow-up (drive+reply only).
+function piDriverSource(): string {
+  return `
+export async function invoke(payload) {
+  const { history, model } = payload;
+  const os = await import('node:os');
+  const fs = await import('node:fs');
+  const cp = await import('node:child_process');
+  const base = String((model && model.endpoint) || '').replace(/\\/chat\\/completions\\/?$/, '');
+  const key = (model && model.apiKey) || '';
+  const modelId = (model && model.id) || 'gpt-5.5';
+  const agentDir = os.homedir() + '/.pi/agent';
+  try { fs.mkdirSync(agentDir, { recursive: true }); } catch (e) {}
+  fs.writeFileSync(agentDir + '/models.json', JSON.stringify({ providers: { cirrus: { baseUrl: base, api: 'openai-completions', apiKey: key, compat: { supportsDeveloperRole: false, supportsReasoningEffort: false }, models: [{ id: modelId }] } } }));
+  try { fs.mkdirSync('/home/user/cirrus/workspace', { recursive: true }); } catch (e) {}
+  const turns = Array.isArray(history) ? history : [];
+  const lastUser = [...turns].reverse().find((t) => t.role === 'user') || { content: '' };
+  const prior = turns.slice(0, Math.max(0, turns.length - 1)).map((t) => (t.role === 'user' ? 'User' : 'Assistant') + ': ' + t.content).join('\\n');
+  const message = (prior ? '<conversation_so_far>\\n' + prior + '\\n</conversation_so_far>\\n\\n' : '') + (lastUser.content || '');
+  const emit = (k, t) => { try { console.log('__CIRRUS_EVENT__' + JSON.stringify({ k: k, t: t })); } catch (e) {} };
+  return await new Promise((resolve) => {
+    let settled = false;
+    const done = (r) => { if (!settled) { settled = true; resolve(r); } };
+    let child;
+    try {
+      child = cp.spawn('pi', ['-p', message, '--provider', 'cirrus', '--model', modelId, '--mode', 'text', '--no-session'], { cwd: '/home/user/cirrus/workspace', env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) { return done({ ok: false, error: 'pi spawn failed: ' + (e && e.message) }); }
+    let outbuf = '';
+    let errbuf = '';
+    child.stdout.on('data', (d) => { outbuf += d.toString(); });
+    child.stderr.on('data', (d) => { errbuf += d.toString(); });
+    child.on('error', (e) => done({ ok: false, error: 'pi error: ' + (e && e.message) }));
+    child.on('close', (code) => {
+      const reply = outbuf.replace(/\\x1b\\[[0-9;]*m/g, '').trim();
+      if (!reply) return done({ ok: false, error: 'pi produced no reply (exit ' + code + '): ' + errbuf.slice(-400) });
+      emit('delta', reply);
+      done({ ok: true, reply: reply, ui: {}, cronRequests: [], posts: [] });
+    });
+  });
+}
+`
+}
+
 function invokeSourceFor(definition: CommunityAgentDefinition): string {
   if (definition.driveNativeCli) {
     if (definition.cliDriver === 'openclaw') return openclawDriverSource(CIRRUS_MCP_SERVER)
     if (definition.cliDriver === 'hermes') return hermesDriverSource(CIRRUS_MCP_SERVER)
     if (definition.cliDriver === 'codex') return codexDriverSource(CIRRUS_MCP_SERVER)
     if (definition.cliDriver === 'claude') return claudeDriverSource(CIRRUS_MCP_SERVER)
+    if (definition.cliDriver === 'pi') return piDriverSource()
     return opencodeDriverSource(CIRRUS_MCP_SERVER)
   }
   return `
