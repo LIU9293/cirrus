@@ -4965,7 +4965,9 @@ function ConnectBotDialog({
   const opt = BOT_OPTIONS.find((o) => o.platform === platform)!
 
   return (
-    <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/40 backdrop-blur-sm cirrus-overlay p-6" onMouseDown={onClose}>
+    // z-[300]: opened from inside a runtime window (z-265 floating / z-280 maximized),
+    // so it must sit above the window — it's portaled to body as a sibling of it.
+    <div className="fixed inset-0 z-[300] grid place-items-center bg-ink/40 backdrop-blur-sm cirrus-overlay p-6" onMouseDown={onClose}>
       <div
         className="cirrus-pop flex w-full max-w-[440px] flex-col overflow-hidden rounded-[18px] border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
         onMouseDown={(e) => e.stopPropagation()}
