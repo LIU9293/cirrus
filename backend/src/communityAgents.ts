@@ -66,7 +66,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     adapter: 'platform-llm-adapter',
     version: '0.6.0',
     defaultModelConfig: platformModel(),
-    nativeCli: { install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash', bin: 'hermes', risky: true },
+    nativeCli: { install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o /tmp/h.sh && bash /tmp/h.sh --skip-setup < /dev/null', bin: 'hermes', risky: true },
     capabilities: ['multi-agent coordination', 'workflow planning', 'handoff routing', 'status synthesis'],
     systemPrompt:
       'You are Hermes, a runtime coordination agent. Focus on decomposing requests, assigning work to available agents, and explaining orchestration decisions clearly.',
@@ -81,7 +81,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     adapter: 'platform-llm-adapter',
     version: '0.6.0',
     defaultModelConfig: platformModel(),
-    nativeCli: { install: "curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash", bin: 'clawbot', risky: true },
+    nativeCli: { install: 'npm install -g openclaw --force', bin: 'openclaw', risky: true },
     capabilities: ['browser task planning', 'website automation planning', 'DOM/action reasoning'],
     systemPrompt:
       'You are OpenClaw, a web automation agent. Help plan browser actions and explain safe website automation steps. Do not claim to click external sites unless a browser tool is explicitly connected.',

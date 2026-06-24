@@ -14,14 +14,27 @@ export const RUNTIME_TEMPLATE_NAME = 'cirrus-runtime'
 // Reliable npm-published CLIs install as one step (fail the build if broken).
 const NPM_CLIS = 'opencode-ai @anthropic-ai/claude-code @openai/codex @mariozechner/pi-coding-agent'
 
-// Hermes & OpenClaw are intentionally NOT baked in: their install scripts are
-// invasive (OpenClaw upgrades Node v20→v24 + installs system build tools; Hermes
-// pulls uv/Python), which breaks the code-interpreter base's Jupyter/envd and
-// makes the template's readiness check time out. Set BAKE_INVASIVE_CLIS=1 to
-// attempt them anyway. They otherwise fall back to per-runtime install.
-const BAKE_INVASIVE = process.env.BAKE_INVASIVE_CLIS === '1'
-const HERMES_INSTALL = 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o /tmp/h.sh && bash /tmp/h.sh < /dev/null || echo "[warn] hermes install failed"'
-const OPENCLAW_INSTALL = "curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh -o /tmp/c.sh && bash /tmp/c.sh < /dev/null || echo \"[warn] openclaw install failed\""
+// Hermes & OpenClaw need Jupyter-safe installs (their default installers break the
+// code-interpreter base): OpenClaw's installer upgrades system Node v20→v24 via
+// NodeSource (which breaks envd/Jupyter), so we install its npm package directly
+// on the existing Node instead. Hermes runs with --skip-setup so it stays in its
+// own uv venv and skips the interactive gateway/browser stages. Best-effort: a
+// failure only warns, so the template build still succeeds.
+const HERMES_INSTALL = 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o /tmp/h.sh && bash /tmp/h.sh --skip-setup < /dev/null || echo "[warn] hermes install failed"'
+// OpenClaw needs Node 24; its installer upgrades system Node via NodeSource, which
+// breaks the code-interpreter base's Jupyter. Install Node 24 into an isolated
+// prefix (/opt/node24, tarball — no apt, system Node 20 stays for Jupyter), install
+// OpenClaw there, and expose a PATH wrapper that runs it with Node 24.
+const OPENCLAW_INSTALL = [
+  'ARCH=$(uname -m); case "$ARCH" in aarch64) NA=arm64;; *) NA=x64;; esac',
+  'curl -fsSL https://nodejs.org/dist/v24.17.0/node-v24.17.0-linux-$NA.tar.xz -o /tmp/n24.tar.xz',
+  'mkdir -p /opt/node24 && tar -xJf /tmp/n24.tar.xz -C /opt/node24 --strip-components=1',
+  // Run npm WITH node24 on PATH so it installs into /opt/node24 (its own prefix),
+  // not the system prefix — otherwise npm's `env node` shim picks up system node 20.
+  'env PATH=/opt/node24/bin:$PATH /opt/node24/bin/npm install -g openclaw@latest',
+  `printf '%s\\n' '#!/bin/bash' 'exec env PATH=/opt/node24/bin:$PATH /opt/node24/bin/openclaw "$@"' > /usr/local/bin/openclaw`,
+  'chmod +x /usr/local/bin/openclaw',
+].join(' && ') + ' || echo "[warn] openclaw install failed"'
 
 async function main() {
   if (!process.env.E2B_API_KEY) throw new Error('E2B_API_KEY is required to build a template.')
@@ -29,12 +42,13 @@ async function main() {
   // Installs run as root: the build's default user is `user`, which can't write
   // to /usr/lib/node_modules for `npm install -g`.
   const asRoot = { user: 'root' }
-  let template = Template()
+  const template = Template()
     .fromTemplate('code-interpreter-v1')
     .runCmd(`npm install -g ${NPM_CLIS}`, asRoot)
-  if (BAKE_INVASIVE) template = template.runCmd(HERMES_INSTALL, asRoot).runCmd(OPENCLAW_INSTALL, asRoot)
-  // Record what we baked in for debugging from inside the sandbox.
-  template = template.runCmd('for b in opencode claude codex pi hermes clawbot; do printf "%s: %s\\n" "$b" "$(command -v "$b" || echo MISSING)"; done > /home/user/.cirrus-clis.txt || true', asRoot)
+    .runCmd(HERMES_INSTALL, asRoot)
+    .runCmd(OPENCLAW_INSTALL, asRoot)
+    // Record what we baked in for debugging from inside the sandbox.
+    .runCmd('for b in opencode claude codex pi hermes openclaw; do printf "%s: %s\\n" "$b" "$(command -v "$b" || echo MISSING)"; done > /home/user/.cirrus-clis.txt || true', asRoot)
 
   const info = await Template.build(template, RUNTIME_TEMPLATE_NAME, {
     apiKey: process.env.E2B_API_KEY,
