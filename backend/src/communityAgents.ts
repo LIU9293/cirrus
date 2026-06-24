@@ -137,7 +137,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'coding',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.7.0',
+    version: '0.8.0',
     defaultModelConfig: subscriptionSkeleton('codex'),
     nativeCli: { install: 'npm i -g @openai/codex', bin: 'codex' },
     driveNativeCli: true,
@@ -473,8 +473,10 @@ export async function invoke(payload) {
 
 // Adapter that DRIVES the native `codex` CLI. Codex has no free model; we register a
 // custom model provider pointing at the platform OpenAI-compatible endpoint (responses
-// API) and run `codex exec --skip-git-repo-check ... --output-last-message <file>`,
-// reading that file as the reply. Platform tools bridged via `codex mcp add`.
+// API) and run `codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox
+// ... --output-last-message <file>`, reading that file as the reply. Platform tools
+// bridged via `codex mcp add` (the bypass flag is required for codex to actually
+// invoke MCP tools in exec mode).
 function codexDriverSource(mcpServerCode: string): string {
   return `
 export async function invoke(payload) {
@@ -531,7 +533,7 @@ export async function invoke(payload) {
     let poller = null;
     const done = (r) => { if (settled) return; settled = true; if (poller) clearInterval(poller); resolve(r); };
     poller = setInterval(drainEvents, 250);
-    const args = ['exec', '--skip-git-repo-check',
+    const args = ['exec', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox',
       '-c', 'model_providers.cirrus.name="cirrus"',
       '-c', 'model_providers.cirrus.base_url="' + base + '"',
       '-c', 'model_providers.cirrus.env_key="OPENAI_API_KEY"',
