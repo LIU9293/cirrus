@@ -45,6 +45,9 @@ async function main() {
   const template = Template()
     .fromTemplate('code-interpreter-v1')
     .runCmd(`npm install -g ${NPM_CLIS}`, asRoot)
+    // Pi has no built-in MCP; bake the MCP client extension so the pi driver can
+    // bridge platform tools (installs into the runtime user's ~/.pi).
+    .runCmd('pi install npm:pi-mcp-extension || echo "[warn] pi-mcp-extension install failed"', asRoot)
     .runCmd(HERMES_INSTALL, asRoot)
     .runCmd(OPENCLAW_INSTALL, asRoot)
     // Record what we baked in for debugging from inside the sandbox.
