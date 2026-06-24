@@ -35,6 +35,9 @@ export interface CommunityAgentDefinition {
    *  later step will drive it instead of the platform-model adapter. `risky` marks
    *  install scripts from less-certain sources (curl|bash) worth reviewing. */
   nativeCli?: { install: string; bin: string; versionCmd?: string; risky?: boolean }
+  /** When true, the in-sandbox adapter DRIVES the native CLI (e.g. `opencode run`)
+   *  instead of running the platform-model tool loop. */
+  driveNativeCli?: boolean
   adapter: 'platform-llm-adapter'
   version: string
   defaultModelConfig: RuntimeAgentModelConfig
@@ -139,9 +142,10 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'coding',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.6.0',
+    version: '0.7.0',
     defaultModelConfig: subscriptionSkeleton('opencode'),
     nativeCli: { install: 'npm i -g opencode-ai', bin: 'opencode' },
+    driveNativeCli: true,
     capabilities: ['coding workflows', 'CLI-oriented engineering guidance', 'open-source agent operations'],
     systemPrompt:
       'You are OpenCode in a Cirrus runtime adapter. Help with coding tasks and CLI-oriented development. Mention when native OpenCode auth/install is not connected.',
@@ -187,7 +191,64 @@ function agentDirName(key: string): string {
   return key.replace(/[^a-zA-Z0-9._-]+/g, '_')
 }
 
+// Adapter that DRIVES the native `opencode` CLI (free default model) instead of the
+// platform-model loop. Runs `opencode run --format json`, streams each text part
+// out via __CIRRUS_EVENT__ delta events, and returns the concatenated reply.
+// TODO(next): bridge ask_user/post_message/cron back via an MCP server.
+function opencodeDriverSource(): string {
+  return `
+export async function invoke(payload) {
+  const { history } = payload;
+  const fs = await import('node:fs');
+  const cp = await import('node:child_process');
+  try { fs.mkdirSync('/home/user/cirrus/workspace', { recursive: true }); } catch (e) {}
+  const turns = Array.isArray(history) ? history : [];
+  const lastUser = [...turns].reverse().find((t) => t.role === 'user') || { content: '' };
+  const prior = turns.slice(0, Math.max(0, turns.length - 1))
+    .map((t) => (t.role === 'user' ? 'User' : 'Assistant') + ': ' + t.content).join('\\n');
+  const message = (prior ? '<conversation_so_far>\\n' + prior + '\\n</conversation_so_far>\\n\\n' : '') + (lastUser.content || '');
+  const emit = (k, t) => { try { console.log('__CIRRUS_EVENT__' + JSON.stringify({ k: k, t: t })); } catch (e) {} };
+  let fullText = '';
+  const partText = {};
+  return await new Promise((resolve) => {
+    let settled = false;
+    const done = (r) => { if (!settled) { settled = true; resolve(r); } };
+    let child;
+    try {
+      child = cp.spawn('opencode', ['run', '--format', 'json', message], { cwd: '/home/user/cirrus/workspace', env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) { return done({ ok: false, error: 'opencode spawn failed: ' + (e && e.message) }); }
+    let buf = '';
+    let errbuf = '';
+    child.stdout.on('data', (d) => {
+      buf += d.toString();
+      let nl;
+      while ((nl = buf.indexOf('\\n')) >= 0) {
+        const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let o; try { o = JSON.parse(line); } catch (e) { continue; }
+        if (o.type === 'text' && o.part && typeof o.part.text === 'string') {
+          const id = o.part.id || 'p';
+          const txt = o.part.text;
+          const prev = partText[id] || '';
+          const delta = txt.startsWith(prev) ? txt.slice(prev.length) : txt;
+          partText[id] = txt;
+          if (delta) { fullText += delta; emit('delta', delta); }
+        }
+      }
+    });
+    child.stderr.on('data', (d) => { errbuf += d.toString(); });
+    child.on('error', (e) => done({ ok: false, error: 'opencode error: ' + (e && e.message) }));
+    child.on('close', (code) => {
+      if (!fullText && code !== 0) return done({ ok: false, error: 'opencode exited ' + code + ': ' + errbuf.slice(-600) });
+      done({ ok: true, reply: fullText || '(opencode produced no output)', ui: {}, cronRequests: [], posts: [] });
+    });
+  });
+}
+`
+}
+
 function invokeSourceFor(definition: CommunityAgentDefinition): string {
+  if (definition.driveNativeCli) return opencodeDriverSource()
   return `
 export async function invoke(payload) {
   const { model, agent, history } = payload;
@@ -664,7 +725,10 @@ export async function invokeInstalledCommunityAgent(
         }
       }
     : undefined
-  const out = await runInRuntimeSandbox(sandboxId, code, { timeoutMs: 90_000, onStdout })
+  // Driving a native CLI (e.g. opencode on its free model) is much slower than the
+  // platform-model loop, so give it a generous timeout.
+  const invokeTimeoutMs = definition.driveNativeCli ? 280_000 : 90_000
+  const out = await runInRuntimeSandbox(sandboxId, code, { timeoutMs: invokeTimeoutMs, onStdout })
   if (!out.ok) {
     const error = out.error ?? (out.stderr || 'Community agent invocation failed.')
     return { ok: false, message: `${definition.name} failed: ${error}`, activities: [...activities, { kind: 'error', text: error, ok: false }] }
