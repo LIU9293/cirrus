@@ -69,7 +69,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'framework',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.7.0',
+    version: '0.8.0',
     defaultModelConfig: platformModel(),
     nativeCli: { install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o /tmp/h.sh && bash /tmp/h.sh --skip-setup < /dev/null', bin: 'hermes', risky: true },
     driveNativeCli: true,
@@ -86,7 +86,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'framework',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.7.0',
+    version: '0.8.0',
     defaultModelConfig: platformModel(),
     nativeCli: { install: 'npm install -g openclaw --force', bin: 'openclaw', risky: true },
     driveNativeCli: true,
@@ -295,30 +295,68 @@ export async function invoke(payload) {
 `
 }
 
-// Adapter that DRIVES the native `openclaw` CLI. OpenClaw has no free model, so we
-// point its embedded agent at the platform OpenAI-compatible endpoint via env
-// (OPENAI_BASE_URL/OPENAI_API_KEY) and parse its --json result (finalAssistantVisibleText).
-// TODO(next): bridge platform tools via `openclaw mcp` (it supports MCP servers).
-function openclawDriverSource(): string {
+// Adapter that DRIVES the native `openclaw` CLI, pointed at the platform endpoint
+// (OPENAI_BASE_URL/OPENAI_API_KEY), parsing its --json result. Platform tools are
+// bridged by registering the in-sandbox MCP server (`openclaw mcp add`); events
+// flow through a per-invoke events file (post_message streamed live, cron/ask collected).
+function openclawDriverSource(mcpServerCode: string): string {
   return `
 export async function invoke(payload) {
-  const { history, model } = payload;
+  const { history, model, platform } = payload;
+  const fs = await import('node:fs');
   const cp = await import('node:child_process');
   const base = String((model && model.endpoint) || '').replace(/\\/chat\\/completions\\/?$/, '');
   const key = (model && model.apiKey) || '';
   const modelId = (model && model.id) || 'gpt-5.5';
+  const emit = (k, t) => { try { console.log('__CIRRUS_EVENT__' + JSON.stringify({ k: k, t: t })); } catch (e) {} };
+
+  // Register the platform-tools MCP server + per-invoke context.
+  const eventsPath = '/tmp/cirrus-evt-' + Date.now() + '-' + Math.floor(Math.random() * 1e6) + '.jsonl';
+  try { fs.writeFileSync(eventsPath, ''); } catch (e) {}
+  fs.writeFileSync('/home/user/.cirrus-mcp-server.cjs', ${JSON.stringify(mcpServerCode)});
+  fs.writeFileSync('/home/user/.cirrus-mcp-ctx.json', JSON.stringify({ eventsPath: eventsPath, agents: (platform && platform.agents) || [], cronJobs: (platform && platform.cronJobs) || [] }));
+  try { cp.execSync('openclaw mcp add cirrus --command node --arg /home/user/.cirrus-mcp-server.cjs', { timeout: 40000, stdio: 'ignore' }); } catch (e) {}
+
   const turns = Array.isArray(history) ? history : [];
   const lastUser = [...turns].reverse().find((t) => t.role === 'user') || { content: '' };
   const prior = turns.slice(0, Math.max(0, turns.length - 1)).map((t) => (t.role === 'user' ? 'User' : 'Assistant') + ': ' + t.content).join('\\n');
-  const message = (prior ? '<conversation_so_far>\\n' + prior + '\\n</conversation_so_far>\\n\\n' : '') + (lastUser.content || '');
-  const emit = (k, t) => { try { console.log('__CIRRUS_EVENT__' + JSON.stringify({ k: k, t: t })); } catch (e) {} };
-  const sessionKey = 'cirrus-' + Date.now();
+  const toolsNote = 'You have Cirrus platform tools (MCP, prefixed cirrus_): post_message (send the user a progress update mid-task), ask_user (ask with quick-reply buttons then stop), send_image, and cron tools. Use post_message during longer work.';
+  const message = toolsNote + '\\n\\n' + (prior ? '<conversation_so_far>\\n' + prior + '\\n</conversation_so_far>\\n\\n' : '') + (lastUser.content || '');
+
+  let evtOffset = 0;
+  const collected = { posts: [], images: [], asks: [], crons: [] };
+  const drainEvents = () => {
+    let raw = '';
+    try { raw = fs.readFileSync(eventsPath, 'utf8'); } catch (e) { return; }
+    if (raw.length <= evtOffset) return;
+    const chunk = raw.slice(evtOffset); evtOffset = raw.length;
+    for (const line of chunk.split('\\n')) {
+      const s = line.trim(); if (!s) continue;
+      let e; try { e = JSON.parse(s); } catch (x) { continue; }
+      if (e.kind === 'post') { collected.posts.push(e.text); emit('post', e.text); }
+      else if (e.kind === 'image') { collected.images.push({ url: e.url, alt: e.alt }); }
+      else if (e.kind === 'ask') { collected.asks.push(e); }
+      else if (e.kind === 'cron') { collected.crons.push(e); }
+    }
+  };
+  const buildExtras = () => {
+    drainEvents();
+    const lastAsk = collected.asks[collected.asks.length - 1];
+    const ui = {};
+    if (lastAsk) { ui.question = lastAsk.question; ui.choices = lastAsk.options; ui.allowFreeText = lastAsk.allowFreeText; }
+    if (collected.images.length) ui.images = collected.images;
+    const cronRequests = collected.crons.map((c) => ({ op: c.op, name: c.name, schedule: c.schedule, message: c.message, targetAgentKey: c.targetAgentKey, id: c.id, patch: c.patch }));
+    return { ui: ui, cronRequests: cronRequests, posts: collected.posts };
+  };
+
   return await new Promise((resolve) => {
     let settled = false;
-    const done = (r) => { if (!settled) { settled = true; resolve(r); } };
+    let poller = null;
+    const done = (r) => { if (settled) return; settled = true; if (poller) clearInterval(poller); resolve(r); };
+    poller = setInterval(drainEvents, 250);
     let child;
     try {
-      child = cp.spawn('openclaw', ['agent', '--local', '--session-key', sessionKey, '-m', message, '--model', modelId, '--json'], { cwd: '/home/user', env: { ...process.env, OPENAI_API_KEY: key, OPENAI_BASE_URL: base }, stdio: ['ignore', 'pipe', 'pipe'] });
+      child = cp.spawn('openclaw', ['agent', '--local', '--session-key', 'cirrus-' + Date.now(), '-m', message, '--model', modelId, '--json'], { cwd: '/home/user', env: { ...process.env, OPENAI_API_KEY: key, OPENAI_BASE_URL: base }, stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (e) { return done({ ok: false, error: 'openclaw spawn failed: ' + (e && e.message) }); }
     let outbuf = '';
     let errbuf = '';
@@ -331,40 +369,82 @@ export async function invoke(payload) {
         const s = outbuf.indexOf('{'); const e = outbuf.lastIndexOf('}');
         if (s >= 0 && e > s) { const j = JSON.parse(outbuf.slice(s, e + 1)); reply = (j.meta && j.meta.finalAssistantVisibleText) || (j.payloads && j.payloads[0] && j.payloads[0].text) || ''; }
       } catch (e) {}
-      if (!reply) return done({ ok: false, error: 'openclaw produced no reply (exit ' + code + '): ' + errbuf.slice(-400) });
-      emit('delta', reply);
-      done({ ok: true, reply: reply, ui: {}, cronRequests: [], posts: [] });
+      const extras = buildExtras();
+      if (!reply && !extras.posts.length && !extras.cronRequests.length && !(extras.ui && extras.ui.choices)) {
+        return done({ ok: false, error: 'openclaw produced no reply (exit ' + code + '): ' + errbuf.slice(-400) });
+      }
+      if (reply) emit('delta', reply);
+      done({ ok: true, reply: reply || '(done)', ui: extras.ui, cronRequests: extras.cronRequests, posts: extras.posts });
     });
   });
 }
 `
 }
 
-// Adapter that DRIVES the native `hermes` CLI. Hermes has no free model; its
-// `openrouter` provider honors OPENROUTER_BASE_URL, so we point it at the platform
-// OpenAI-compatible endpoint and run `hermes -z "<prompt>" -m <model> --provider
-// openrouter`, taking stdout (ANSI-stripped) as the reply.
-// TODO(next): bridge platform tools via `hermes mcp`.
-function hermesDriverSource(): string {
+// Adapter that DRIVES the native `hermes` CLI, pointed at the platform endpoint via
+// its `openrouter` provider (OPENROUTER_BASE_URL override). Platform tools are bridged
+// by registering the in-sandbox MCP server (`hermes mcp add`, auto-confirming tool
+// enable via stdin); events flow through a per-invoke events file. Reply = ANSI-
+// stripped stdout. --yolo auto-approves tool execution (no interactive prompt).
+function hermesDriverSource(mcpServerCode: string): string {
   return `
 export async function invoke(payload) {
-  const { history, model } = payload;
+  const { history, model, platform } = payload;
+  const fs = await import('node:fs');
   const cp = await import('node:child_process');
   const base = String((model && model.endpoint) || '').replace(/\\/chat\\/completions\\/?$/, '');
   const key = (model && model.apiKey) || '';
   const modelId = (model && model.id) || 'gpt-5.5';
+  const emit = (k, t) => { try { console.log('__CIRRUS_EVENT__' + JSON.stringify({ k: k, t: t })); } catch (e) {} };
+
+  // Register the platform-tools MCP server + per-invoke context (auto-confirm tools).
+  const eventsPath = '/tmp/cirrus-evt-' + Date.now() + '-' + Math.floor(Math.random() * 1e6) + '.jsonl';
+  try { fs.writeFileSync(eventsPath, ''); } catch (e) {}
+  fs.writeFileSync('/home/user/.cirrus-mcp-server.cjs', ${JSON.stringify(mcpServerCode)});
+  fs.writeFileSync('/home/user/.cirrus-mcp-ctx.json', JSON.stringify({ eventsPath: eventsPath, agents: (platform && platform.agents) || [], cronJobs: (platform && platform.cronJobs) || [] }));
+  try { cp.execSync('yes | hermes mcp add cirrus --command node --args /home/user/.cirrus-mcp-server.cjs', { timeout: 40000, stdio: 'ignore', shell: '/bin/bash' }); } catch (e) {}
+
   const turns = Array.isArray(history) ? history : [];
   const lastUser = [...turns].reverse().find((t) => t.role === 'user') || { content: '' };
   const prior = turns.slice(0, Math.max(0, turns.length - 1)).map((t) => (t.role === 'user' ? 'User' : 'Assistant') + ': ' + t.content).join('\\n');
-  const message = (prior ? '<conversation_so_far>\\n' + prior + '\\n</conversation_so_far>\\n\\n' : '') + (lastUser.content || '');
-  const emit = (k, t) => { try { console.log('__CIRRUS_EVENT__' + JSON.stringify({ k: k, t: t })); } catch (e) {} };
+  const toolsNote = 'You have Cirrus platform tools (MCP, prefixed cirrus_): post_message (send the user a progress update mid-task), ask_user (ask with quick-reply buttons then stop), send_image, and cron tools. Use post_message during longer work.';
+  const message = toolsNote + '\\n\\n' + (prior ? '<conversation_so_far>\\n' + prior + '\\n</conversation_so_far>\\n\\n' : '') + (lastUser.content || '');
+
+  let evtOffset = 0;
+  const collected = { posts: [], images: [], asks: [], crons: [] };
+  const drainEvents = () => {
+    let raw = '';
+    try { raw = fs.readFileSync(eventsPath, 'utf8'); } catch (e) { return; }
+    if (raw.length <= evtOffset) return;
+    const chunk = raw.slice(evtOffset); evtOffset = raw.length;
+    for (const line of chunk.split('\\n')) {
+      const s = line.trim(); if (!s) continue;
+      let e; try { e = JSON.parse(s); } catch (x) { continue; }
+      if (e.kind === 'post') { collected.posts.push(e.text); emit('post', e.text); }
+      else if (e.kind === 'image') { collected.images.push({ url: e.url, alt: e.alt }); }
+      else if (e.kind === 'ask') { collected.asks.push(e); }
+      else if (e.kind === 'cron') { collected.crons.push(e); }
+    }
+  };
+  const buildExtras = () => {
+    drainEvents();
+    const lastAsk = collected.asks[collected.asks.length - 1];
+    const ui = {};
+    if (lastAsk) { ui.question = lastAsk.question; ui.choices = lastAsk.options; ui.allowFreeText = lastAsk.allowFreeText; }
+    if (collected.images.length) ui.images = collected.images;
+    const cronRequests = collected.crons.map((c) => ({ op: c.op, name: c.name, schedule: c.schedule, message: c.message, targetAgentKey: c.targetAgentKey, id: c.id, patch: c.patch }));
+    return { ui: ui, cronRequests: cronRequests, posts: collected.posts };
+  };
+
   return await new Promise((resolve) => {
     let settled = false;
-    const done = (r) => { if (!settled) { settled = true; resolve(r); } };
+    let poller = null;
+    const done = (r) => { if (settled) return; settled = true; if (poller) clearInterval(poller); resolve(r); };
+    poller = setInterval(drainEvents, 250);
     const env = { ...process.env, OPENROUTER_API_KEY: key, OPENROUTER_BASE_URL: base, OPENAI_API_KEY: key, OPENAI_BASE_URL: base };
     let child;
     try {
-      child = cp.spawn('hermes', ['-z', message, '-m', modelId, '--provider', 'openrouter'], { cwd: '/home/user', env: env, stdio: ['ignore', 'pipe', 'pipe'] });
+      child = cp.spawn('hermes', ['-z', message, '-m', modelId, '--provider', 'openrouter', '--yolo'], { cwd: '/home/user', env: env, stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (e) { return done({ ok: false, error: 'hermes spawn failed: ' + (e && e.message) }); }
     let outbuf = '';
     let errbuf = '';
@@ -373,9 +453,12 @@ export async function invoke(payload) {
     child.on('error', (e) => done({ ok: false, error: 'hermes error: ' + (e && e.message) }));
     child.on('close', (code) => {
       const reply = outbuf.replace(/\\x1b\\[[0-9;]*m/g, '').trim();
-      if (!reply) return done({ ok: false, error: 'hermes produced no reply (exit ' + code + '): ' + errbuf.slice(-400) });
-      emit('delta', reply);
-      done({ ok: true, reply: reply, ui: {}, cronRequests: [], posts: [] });
+      const extras = buildExtras();
+      if (!reply && !extras.posts.length && !extras.cronRequests.length && !(extras.ui && extras.ui.choices)) {
+        return done({ ok: false, error: 'hermes produced no reply (exit ' + code + '): ' + errbuf.slice(-400) });
+      }
+      if (reply) emit('delta', reply);
+      done({ ok: true, reply: reply || '(done)', ui: extras.ui, cronRequests: extras.cronRequests, posts: extras.posts });
     });
   });
 }
@@ -384,8 +467,8 @@ export async function invoke(payload) {
 
 function invokeSourceFor(definition: CommunityAgentDefinition): string {
   if (definition.driveNativeCli) {
-    if (definition.cliDriver === 'openclaw') return openclawDriverSource()
-    if (definition.cliDriver === 'hermes') return hermesDriverSource()
+    if (definition.cliDriver === 'openclaw') return openclawDriverSource(CIRRUS_MCP_SERVER)
+    if (definition.cliDriver === 'hermes') return hermesDriverSource(CIRRUS_MCP_SERVER)
     return opencodeDriverSource(CIRRUS_MCP_SERVER)
   }
   return `

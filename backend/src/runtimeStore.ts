@@ -30,11 +30,15 @@ function rowToRuntime(r: RuntimeRow): RuntimeRecord {
 
 export async function createRuntime(ownerId: string, name: string, agents: RuntimeAgentRef[]): Promise<RuntimeRecord> {
   const now = new Date().toISOString()
+  const normalizedAgents = agents.map(normalizeRuntimeAgentRef)
+  // Default the runtime name to its agents (e.g. "Hermes", "Hermes + OpenCode")
+  // so runtimes are distinguishable instead of all being "Untitled runtime".
+  const agentNames = normalizedAgents.map((a) => a.name).filter(Boolean)
   const record: RuntimeRecord = {
     id: newRuntimeId(),
     ownerId,
-    name: name.trim() || 'Untitled runtime',
-    agents: agents.map(normalizeRuntimeAgentRef),
+    name: name.trim() || agentNames.slice(0, 3).join(' + ') || 'Untitled runtime',
+    agents: normalizedAgents,
     status: 'provisioning',
     sandboxId: null,
     sandboxKind: 'local',
