@@ -1647,6 +1647,27 @@ function RequirementsPanelContent({
 
 /* ──────────────── Edit Skill · floating frosted panel ──────────────── */
 
+// Start a window-level pointer drag. `onMove` receives the total delta from the
+// press point and fires until pointerup/pointercancel ANYWHERE on the page. We
+// listen on `window` (not the element, no pointer capture) so the drag survives
+// the dragged window being reordered in the DOM (bring-to-front changes z-order,
+// which detaches/reattaches the node and would otherwise drop pointer capture →
+// the old code missed pointerup and the window "followed the mouse" forever).
+function startPointerDrag(e: React.PointerEvent, onMove: (dx: number, dy: number) => void) {
+  e.preventDefault()
+  const sx = e.clientX
+  const sy = e.clientY
+  const move = (ev: PointerEvent) => onMove(ev.clientX - sx, ev.clientY - sy)
+  const stop = () => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', stop)
+    window.removeEventListener('pointercancel', stop)
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', stop)
+  window.addEventListener('pointercancel', stop)
+}
+
 function SkillPanel({
   appId,
   miniapp,
@@ -1701,62 +1722,39 @@ function SkillPanel({
   const tools = skill?.tools ?? []
   const hasCredentialsSection = !!skill && (!!skill.credentials?.length || skill.platformSkillId === 'gmail')
   const builtin = !!skill && (skill.kind === 'builtin' || skill.source === 'library')
-  const stagger = index * 26 // cascade multiple open panels
   const rootRef = useRef<HTMLDivElement>(null)
   const [max, setMax] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [styleOpen, setStyleOpen] = useState(false)
   const appStyle: MiniappStyle = miniapp.draft?.style ?? 'default'
 
-  // Drag the whole header (windowed mode only; ignores clicks on buttons).
-  const [d, setD] = useState({ x: 0, y: 0 })
-  const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null)
+  // Drag the whole header (windowed mode only; ignores clicks on buttons). The
+  // cascade offset for stacked panels is baked into the INITIAL position only, so
+  // bringing a window to front (which reorders the panel array, changing `index`)
+  // never shifts any window — it used to add `index * 26` live in the transform.
+  const [d, setD] = useState(() => ({ x: index * 26, y: index * 26 }))
   const onHeaderDown = (e: React.PointerEvent) => {
     if (max || (e.target as HTMLElement).closest('button')) return
-    dragRef.current = { sx: e.clientX, sy: e.clientY, ox: d.x, oy: d.y }
-    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
-  }
-  const onHeaderMove = (e: React.PointerEvent) => {
-    const g = dragRef.current
-    if (!g) return
-    setD({ x: g.ox + (e.clientX - g.sx), y: g.oy + (e.clientY - g.sy) })
-  }
-  const onHeaderUp = () => {
-    dragRef.current = null
+    const ox = d.x
+    const oy = d.y
+    startPointerDrag(e, (dx, dy) => setD({ x: ox + dx, y: oy + dy }))
   }
 
   // Resizable via the bottom-right corner.
   const [size, setSize] = useState({ w: 800, h: 560 })
-  const sizeRef = useRef<{ sx: number; sy: number; sw: number; sh: number } | null>(null)
   const onResizeDown = (e: React.PointerEvent) => {
     e.stopPropagation()
-    sizeRef.current = { sx: e.clientX, sy: e.clientY, sw: size.w, sh: size.h }
-    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
-  }
-  const onResizeMove = (e: React.PointerEvent) => {
-    const r = sizeRef.current
-    if (!r) return
-    setSize({ w: Math.max(460, r.sw + (e.clientX - r.sx)), h: Math.max(320, r.sh + (e.clientY - r.sy)) })
-  }
-  const onResizeUp = () => {
-    sizeRef.current = null
+    const sw = size.w
+    const sh = size.h
+    startPointerDrag(e, (dx, dy) => setSize({ w: Math.max(460, sw + dx), h: Math.max(320, sh + dy) }))
   }
 
   // Draggable divider between the two columns.
   const [rightW, setRightW] = useState(330)
-  const splitRef = useRef<{ sx: number; sw: number } | null>(null)
   const onSplitDown = (e: React.PointerEvent) => {
     e.stopPropagation()
-    splitRef.current = { sx: e.clientX, sw: rightW }
-    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
-  }
-  const onSplitMove = (e: React.PointerEvent) => {
-    const s = splitRef.current
-    if (!s) return
-    setRightW(Math.max(240, Math.min(560, s.sw - (e.clientX - s.sx))))
-  }
-  const onSplitUp = () => {
-    splitRef.current = null
+    const sw = rightW
+    startPointerDrag(e, (dx) => setRightW(Math.max(240, Math.min(560, sw - dx))))
   }
 
   // Minimize with a shrink-to-card animation (macOS-genie-ish).
@@ -1883,7 +1881,7 @@ function SkillPanel({
         onFront()
       }}
       className={cn('absolute z-50 cursor-default select-text', max ? 'inset-x-6 top-[100px] bottom-6' : 'left-1/2 top-1/2')}
-      style={max ? undefined : { width: size.w, transform: `translate(calc(-50% + ${d.x + stagger}px), calc(-50% + ${d.y + stagger}px))` }}
+      style={max ? undefined : { width: size.w, transform: `translate(calc(-50% + ${d.x}px), calc(-50% + ${d.y}px))` }}
     >
       <div
         className={cn(
@@ -1895,8 +1893,6 @@ function SkillPanel({
         {/* Title bar (drag anywhere in windowed mode) */}
         <div
           onPointerDown={onHeaderDown}
-          onPointerMove={onHeaderMove}
-          onPointerUp={onHeaderUp}
           className={cn('flex select-none items-center gap-3 border-b border-black/5 px-4 py-3', !max && 'cursor-grab active:cursor-grabbing')}
         >
           <div className="flex size-[34px] items-center justify-center rounded-[9px] bg-surface-muted text-ink">
@@ -2050,8 +2046,6 @@ function SkillPanel({
             </div>
             <div
               onPointerDown={onSplitDown}
-              onPointerMove={onSplitMove}
-              onPointerUp={onSplitUp}
               className="w-1.5 shrink-0 cursor-col-resize bg-black/5 transition-colors hover:bg-primary/40"
             />
             <div className="flex min-h-0 shrink-0 flex-col" style={{ width: rightW }}>
@@ -2225,8 +2219,6 @@ function SkillPanel({
           {/* Draggable column divider */}
           <div
             onPointerDown={onSplitDown}
-            onPointerMove={onSplitMove}
-            onPointerUp={onSplitUp}
             className="w-1.5 shrink-0 cursor-col-resize bg-black/5 transition-colors hover:bg-primary/40"
           />
 
@@ -2327,8 +2319,6 @@ function SkillPanel({
         {/* Corner resize handle */}
         <div
           onPointerDown={onResizeDown}
-          onPointerMove={onResizeMove}
-          onPointerUp={onResizeUp}
           className="absolute bottom-0.5 right-0.5 flex size-4 cursor-nwse-resize items-center justify-center text-ink-tertiary"
           aria-label="Resize"
         >
@@ -3768,57 +3758,39 @@ function RuntimeWindow({
   const activeTab = tab
 
   // ── Window chrome (mirrors the agent-canvas skill panels) ──
-  const stagger = index * 26
   const rootRef = useRef<HTMLDivElement>(null)
   const [max, setMax] = useState(false)
   const compactWindow = useMediaQuery('(max-width: 767px)')
 
-  const [d, setD] = useState({ x: 0, y: 0 })
-  const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null)
+  // Cascade offset baked into the INITIAL position only — bringing a window to
+  // front reorders the panel array (changes `index`) and must not move any window.
+  const [d, setD] = useState(() => ({ x: index * 26, y: index * 26 }))
   const onHeaderDown = (e: React.PointerEvent) => {
     if (compactWindow || max || (e.target as HTMLElement).closest('button')) return
-    dragRef.current = { sx: e.clientX, sy: e.clientY, ox: d.x, oy: d.y }
-    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+    const ox = d.x
+    const oy = d.y
+    startPointerDrag(e, (dx, dy) => setD({ x: ox + dx, y: oy + dy }))
   }
-  const onHeaderMove = (e: React.PointerEvent) => {
-    const g = dragRef.current
-    if (!g) return
-    setD({ x: g.ox + (e.clientX - g.sx), y: g.oy + (e.clientY - g.sy) })
-  }
-  const onHeaderUp = () => { dragRef.current = null }
 
   const [size, setSize] = useState({ w: 900, h: 560 })
-  const sizeRef = useRef<{ sx: number; sy: number; sw: number; sh: number } | null>(null)
   const onResizeDown = (e: React.PointerEvent) => {
     if (compactWindow) return
     e.stopPropagation()
-    sizeRef.current = { sx: e.clientX, sy: e.clientY, sw: size.w, sh: size.h }
-    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+    const sw = size.w
+    const sh = size.h
+    startPointerDrag(e, (dx, dy) => setSize({ w: Math.max(showMiniapp ? 760 : 480, sw + dx), h: Math.max(360, sh + dy) }))
   }
-  const onResizeMove = (e: React.PointerEvent) => {
-    const r = sizeRef.current
-    if (!r) return
-    setSize({ w: Math.max(showMiniapp ? 760 : 480, r.sw + (e.clientX - r.sx)), h: Math.max(360, r.sh + (e.clientY - r.sy)) })
-  }
-  const onResizeUp = () => { sizeRef.current = null }
 
   const [runtimeSplitW, setRuntimeSplitW] = useState(420)
-  const runtimeSplitRef = useRef<{ sx: number; sw: number } | null>(null)
   const onRuntimeSplitDown = (e: React.PointerEvent) => {
     if (compactWindow) return
     e.stopPropagation()
-    runtimeSplitRef.current = { sx: e.clientX, sw: runtimeSplitW }
-    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
-  }
-  const onRuntimeSplitMove = (e: React.PointerEvent) => {
-    const s = runtimeSplitRef.current
-    if (!s) return
-    const total = rootRef.current?.getBoundingClientRect().width ?? size.w
-    const maxRight = Math.max(320, total - 320)
-    setRuntimeSplitW(Math.max(300, Math.min(maxRight, s.sw - (e.clientX - s.sx))))
-  }
-  const onRuntimeSplitUp = () => {
-    runtimeSplitRef.current = null
+    const sw = runtimeSplitW
+    startPointerDrag(e, (dx) => {
+      const total = rootRef.current?.getBoundingClientRect().width ?? size.w
+      const maxRight = Math.max(320, total - 320)
+      setRuntimeSplitW(Math.max(300, Math.min(maxRight, sw - dx)))
+    })
   }
 
   // Close with a shrink-to-card animation toward the originating card.
@@ -3855,7 +3827,7 @@ function RuntimeWindow({
             ? 'z-[280] inset-5'
             : 'z-[265] left-1/2 top-1/2',
       )}
-      style={compactWindow || max ? undefined : { width: size.w, transform: `translate(calc(-50% + ${d.x + stagger}px), calc(-50% + ${d.y + stagger}px))` }}
+      style={compactWindow || max ? undefined : { width: size.w, transform: `translate(calc(-50% + ${d.x}px), calc(-50% + ${d.y}px))` }}
     >
       <div
         className={cn('relative flex flex-col overflow-hidden rounded-[20px] border border-white/70 shadow-[0_26px_64px_-14px_rgba(25,25,23,0.36)]', (max || compactWindow) && 'h-full')}
@@ -3871,8 +3843,6 @@ function RuntimeWindow({
         {/* Title bar — drag anywhere (windowed mode) */}
         <div
           onPointerDown={onHeaderDown}
-          onPointerMove={onHeaderMove}
-          onPointerUp={onHeaderUp}
           className={cn('flex select-none items-center gap-3 border-b border-black/5 px-3 py-3 sm:px-4', !compactWindow && !max && 'cursor-grab active:cursor-grabbing')}
         >
           <div className="flex size-[34px] items-center justify-center rounded-[9px] bg-accent-soft text-accent-ink">
@@ -3990,8 +3960,6 @@ function RuntimeWindow({
                 <>
                   <div
                     onPointerDown={onRuntimeSplitDown}
-                    onPointerMove={onRuntimeSplitMove}
-                    onPointerUp={onRuntimeSplitUp}
                     className="hidden w-1.5 shrink-0 cursor-col-resize bg-black/5 transition-colors hover:bg-primary/40 md:block"
                     aria-label="Resize runtime mini app split"
                   />
@@ -4034,8 +4002,6 @@ function RuntimeWindow({
         {/* Corner resize handle */}
         <div
           onPointerDown={onResizeDown}
-          onPointerMove={onResizeMove}
-          onPointerUp={onResizeUp}
           className="absolute bottom-0.5 right-0.5 hidden size-4 cursor-nwse-resize items-center justify-center text-ink-tertiary sm:flex"
           aria-label="Resize"
         >
@@ -4425,21 +4391,16 @@ function CronPanel({ runtimeId, runtime, compact }: { runtimeId: string; runtime
   // The chat defaults small; drag the divider to widen it.
   const containerRef = useRef<HTMLDivElement>(null)
   const [chatW, setChatW] = useState(330)
-  const dragRef = useRef<{ sx: number; sw: number } | null>(null)
   const onSplitDown = (e: React.PointerEvent) => {
     if (compact) return
     e.stopPropagation()
-    dragRef.current = { sx: e.clientX, sw: chatW }
-    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+    const sw = chatW
+    startPointerDrag(e, (dx) => {
+      const total = containerRef.current?.getBoundingClientRect().width ?? 800
+      const maxChat = Math.max(280, total - 300)
+      setChatW(Math.max(280, Math.min(maxChat, sw - dx)))
+    })
   }
-  const onSplitMove = (e: React.PointerEvent) => {
-    const d = dragRef.current
-    if (!d) return
-    const total = containerRef.current?.getBoundingClientRect().width ?? 800
-    const maxChat = Math.max(280, total - 300)
-    setChatW(Math.max(280, Math.min(maxChat, d.sw - (e.clientX - d.sx))))
-  }
-  const onSplitUp = () => { dragRef.current = null }
 
   return (
     <div ref={containerRef} className={cn('flex min-h-0 flex-1', compact ? 'flex-col' : 'flex-row')}>
@@ -4471,8 +4432,6 @@ function CronPanel({ runtimeId, runtime, compact }: { runtimeId: string; runtime
       {!compact && (
         <div
           onPointerDown={onSplitDown}
-          onPointerMove={onSplitMove}
-          onPointerUp={onSplitUp}
           className="w-1.5 shrink-0 cursor-col-resize bg-black/5 transition-colors hover:bg-primary/40"
           aria-label="Resize chat"
         />
