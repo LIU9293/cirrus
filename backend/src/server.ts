@@ -20,7 +20,7 @@ import { isValidCron } from './cron.ts'
 import { resolveCanvasScreenshot } from './canvasScreenshot.ts'
 import { PLATFORM_SKILLS } from './skills/library.ts'
 import { resolveSkillSettings, writeSkillSettings, settingsFilled, declaredSettings, skillBindingKey, type SkillBindingContext } from './skills/settings.ts'
-import { planAndAttachSkills, developSkill, refineFile, chatAboutSkill, chatAboutSurface } from './skills/service.ts'
+import { planAndAttachSkills, developSkill, refineFile, chatAboutSkill, chatAboutSurface, analyzeSkill } from './skills/service.ts'
 import { listAgentTree, readAgentFile, writeAgentFile, ensureSoul } from './agentfs.ts'
 import { getDatastoreDriver } from './datastore/index.ts'
 import { getSandboxDriver } from './sandbox/index.ts'
@@ -473,6 +473,15 @@ app.post('/api/miniapps/:id/agent/refine', async (req, res) => {
 app.get('/api/skills/library', async (_req, res) => {
   const visible = new Set(['gmail', 'github', 'http_request', 'database'])
   res.json({ skills: PLATFORM_SKILLS.filter((skill) => visible.has(skill.id)) })
+})
+
+// Analyse a free-text "skill I want" description into a drafted skill (name +
+// initial tool-call contract). Record-independent — used by the Add Skills dialog.
+app.post('/api/skills/analyze', async (req, res) => {
+  const description = String(req.body?.description ?? '').trim()
+  if (!description) return res.status(400).json({ error: 'description required' })
+  const result = await analyzeSkill(description)
+  res.json(result)
 })
 
 // Analyse the app's goal and attach the planned skills (auto-add library matches,

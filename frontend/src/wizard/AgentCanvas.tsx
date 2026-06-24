@@ -62,6 +62,7 @@ import type {
 import {
   clarifyConcept,
   planSkills as apiPlanSkills,
+  analyzeSkill as apiAnalyzeSkill,
   listSkillLibrary,
   getAgentFile,
   putAgentFile,
@@ -847,10 +848,6 @@ function CapabilitiesColumn({
           <AddSkillsDialog
             existingPlatformIds={new Set(skills.map((s) => s.platformSkillId).filter(Boolean) as string[])}
             onAddSkill={(s) => addSkill(s)}
-            onAddCustom={(d) => {
-              addSkill(customSkill(d))
-              setAddOpen(false)
-            }}
             onClose={() => setAddOpen(false)}
           />,
           document.body,
@@ -5149,7 +5146,8 @@ export function BuildChat({
   mentionAgents?: RuntimeAgentRef[]
 }) {
   const [input, setInput] = useState('')
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const overlayRef = useRef<HTMLDivElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [workingStartedAt, setWorkingStartedAt] = useState<number | null>(null)
@@ -5181,6 +5179,17 @@ export function BuildChat({
     const timers = [0, 60, 160, 320].map((d) => window.setTimeout(toBottom, d))
     return () => timers.forEach(clearTimeout)
   }, [loading, toBottom])
+  // Auto-grow the chat textarea up to ~3 lines (then it scrolls). Keep the
+  // mention-highlight overlay's scroll in sync with the textarea.
+  const INPUT_MAX_HEIGHT = 66
+  const autoGrowInput = useCallback(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, INPUT_MAX_HEIGHT)}px`
+    if (overlayRef.current) overlayRef.current.scrollTop = el.scrollTop
+  }, [])
+  useLayoutEffect(autoGrowInput, [input, autoGrowInput])
   const send = () => {
     const t = input.trim()
     if (!t || building || !onSend) return
@@ -5275,12 +5284,13 @@ export function BuildChat({
               ))}
             </div>
           )}
-          <div className="flex items-center gap-2 rounded-full border border-border-strong bg-white/80 py-1.5 pl-3.5 pr-1.5">
+          <div className="flex items-end gap-2 rounded-[20px] border border-border-strong bg-white/80 py-1.5 pl-3.5 pr-1.5">
             <div className="relative min-w-0 flex-1">
               {input && (
                 <div
+                  ref={overlayRef}
                   aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 flex items-center overflow-hidden whitespace-pre text-[13px] leading-none text-ink"
+                  className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words py-1 text-[13px] leading-[18px] text-ink"
                 >
                   {inputSegments.map((segment, i) => (
                     <span key={i} className={segment.mention ? 'font-medium text-primary' : undefined}>
@@ -5289,23 +5299,33 @@ export function BuildChat({
                   ))}
                 </div>
               )}
-              <input
+              <textarea
                 ref={inputRef}
+                rows={1}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && send()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    send()
+                  }
+                }}
+                onScroll={() => {
+                  if (overlayRef.current && inputRef.current) overlayRef.current.scrollTop = inputRef.current.scrollTop
+                }}
                 disabled={building}
                 placeholder={placeholder}
                 className={cn(
-                  'relative z-10 w-full bg-transparent text-[13px] outline-none caret-ink placeholder:text-ink-tertiary disabled:opacity-60',
+                  'relative z-10 block w-full resize-none overflow-y-auto bg-transparent py-1 text-[13px] leading-[18px] outline-none caret-ink placeholder:text-ink-tertiary disabled:opacity-60',
                   input ? 'text-transparent' : 'text-ink',
                 )}
+                style={{ maxHeight: INPUT_MAX_HEIGHT }}
               />
             </div>
             <button
               onClick={send}
               disabled={building || !input.trim()}
-              className="flex size-7 items-center justify-center rounded-full bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40"
+              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40"
               aria-label="Send"
             >
               <ArrowUp className="size-[15px]" />
@@ -5473,21 +5493,6 @@ function platformToSkill(p: PlatformSkill): MiniappSkill {
   }
 }
 
-function customSkill(desc: string): MiniappSkill {
-  return {
-    id: newSkillId(),
-    name: desc.length > 36 ? desc.slice(0, 36) + '…' : desc || 'Custom skill',
-    category: 'tool',
-    description: desc,
-    source: 'generated',
-    kind: 'custom',
-    status: 'needs_dev',
-    tools: [],
-    credentials: [],
-    config: { suggestedMethods: ['generate', 'integrate'] },
-  }
-}
-
 // The platform skills from the design. `pid` maps to a backend platform skill
 // when one exists; otherwise we synthesize a built-in skill from the design entry.
 const DESIGN_SKILLS: { pid: string; name: string; desc: string; cat: MiniappSkill['category']; icon: React.ReactNode }[] = [
@@ -5500,19 +5505,36 @@ const DESIGN_SKILLS: { pid: string; name: string; desc: string; cat: MiniappSkil
 function AddSkillsDialog({
   existingPlatformIds,
   onAddSkill,
-  onAddCustom,
   onClose,
 }: {
   existingPlatformIds: Set<string>
   onAddSkill: (s: MiniappSkill) => void
-  onAddCustom: (desc: string) => void
   onClose: () => void
 }) {
   const [lib, setLib] = useState<PlatformSkill[]>([])
   const [desc, setDesc] = useState('')
+  const [analyzing, setAnalyzing] = useState(false)
+  const [draft, setDraft] = useState<{ skill: MiniappSkill; summary: string } | null>(null)
+  const [analyzeError, setAnalyzeError] = useState('')
   useEffect(() => {
     void listSkillLibrary().then(setLib).catch(() => {})
   }, [])
+
+  const analyze = async () => {
+    const text = desc.trim()
+    if (!text || analyzing) return
+    setAnalyzing(true)
+    setAnalyzeError('')
+    setDraft(null)
+    try {
+      const result = await apiAnalyzeSkill(text)
+      setDraft(result)
+    } catch {
+      setAnalyzeError('Could not analyze that skill. Try rephrasing, or add it as a draft.')
+    } finally {
+      setAnalyzing(false)
+    }
+  }
 
   const add = (d: (typeof DESIGN_SKILLS)[number]) => {
     const real = lib.find((p) => p.id === d.pid)
@@ -5594,23 +5616,90 @@ function AddSkillsDialog({
 
           <div className="flex flex-col gap-3 p-5">
             <div className="font-mono text-[10.5px] tracking-[0.13em] text-ink-tertiary">ADD YOUR OWN SKILL</div>
+            <div className="text-[12.5px] text-ink-secondary">
+              Describe the capability you want — we’ll analyze it and draft an initial skill with a name and tools.
+            </div>
             <div className="flex items-center gap-2 rounded-full border border-border-strong bg-surface py-2 pl-4 pr-2">
               <input
                 value={desc}
-                onChange={(e) => setDesc(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && desc.trim() && onAddCustom(desc.trim())}
-                placeholder="Describe what skill you want to have"
-                className="min-w-0 flex-1 bg-transparent text-[14px] text-ink outline-none placeholder:text-ink-tertiary"
+                onChange={(e) => {
+                  setDesc(e.target.value)
+                  if (draft) setDraft(null)
+                }}
+                onKeyDown={(e) => e.key === 'Enter' && void analyze()}
+                disabled={analyzing}
+                placeholder="e.g. Look up current weather for a city"
+                className="min-w-0 flex-1 bg-transparent text-[14px] text-ink outline-none placeholder:text-ink-tertiary disabled:opacity-60"
               />
               <button
-                onClick={() => desc.trim() && onAddCustom(desc.trim())}
-                disabled={!desc.trim()}
+                onClick={() => void analyze()}
+                disabled={!desc.trim() || analyzing}
                 className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40"
-                aria-label="Add"
+                aria-label="Analyze"
               >
-                <ArrowUp className="size-[17px]" />
+                {analyzing ? <Loader2 className="size-[16px] animate-spin" /> : <Sparkles className="size-[16px]" />}
               </button>
             </div>
+
+            {analyzing && (
+              <div className="flex items-center gap-2 text-[12.5px] text-ink-tertiary">
+                <Loader2 className="size-3.5 animate-spin" /> Analyzing your skill…
+              </div>
+            )}
+
+            {analyzeError && <div className="text-[12.5px] text-red-600">{analyzeError}</div>}
+
+            {draft && (
+              <div className="cirrus-fade-up flex flex-col gap-3 rounded-[14px] border border-border-strong bg-surface-muted/40 p-4">
+                <div className="flex items-start gap-2.5">
+                  <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-[8px] bg-surface text-ink">
+                    {CAT_ICON[draft.skill.category] ?? <Sparkles className="size-[17px]" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-[14px] font-semibold text-ink">{draft.skill.name}</span>
+                      <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-tertiary">
+                        {draft.skill.category}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-[12.5px] leading-snug text-ink-secondary">{draft.skill.description}</div>
+                  </div>
+                </div>
+
+                {!!draft.skill.tools?.length && (
+                  <div className="flex flex-col gap-1.5">
+                    <div className="font-mono text-[10px] tracking-[0.13em] text-ink-tertiary">DRAFTED TOOLS</div>
+                    {draft.skill.tools.map((t) => (
+                      <div key={t.name} className="flex items-baseline gap-2 text-[12px]">
+                        <code className="rounded bg-surface px-1.5 py-0.5 font-mono text-[11px] text-ink">{t.name}</code>
+                        <span className="min-w-0 flex-1 truncate text-ink-tertiary">{t.description}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {draft.summary && <div className="text-[11.5px] italic text-ink-tertiary">{draft.summary}</div>}
+
+                <div className="flex items-center gap-2 pt-0.5">
+                  <button
+                    onClick={() => {
+                      onAddSkill(draft.skill)
+                      onClose()
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-[10px] bg-primary px-3.5 py-2 text-[13px] font-semibold text-primary-foreground hover:opacity-90"
+                  >
+                    <Plus className="size-[15px]" /> Add this skill
+                  </button>
+                  <button
+                    onClick={() => void analyze()}
+                    disabled={analyzing}
+                    className="inline-flex items-center gap-1.5 rounded-[10px] border border-border px-3.5 py-2 text-[13px] font-medium text-ink-secondary hover:bg-surface-muted disabled:opacity-50"
+                  >
+                    Regenerate
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

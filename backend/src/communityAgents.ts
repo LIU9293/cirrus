@@ -69,7 +69,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'framework',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.8.0',
+    version: '0.9.0',
     defaultModelConfig: platformModel(),
     nativeCli: { install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o /tmp/h.sh && bash /tmp/h.sh --skip-setup < /dev/null', bin: 'hermes', risky: true },
     driveNativeCli: true,
@@ -86,7 +86,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'framework',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.8.0',
+    version: '0.9.0',
     defaultModelConfig: platformModel(),
     nativeCli: { install: 'npm install -g openclaw --force', bin: 'openclaw', risky: true },
     driveNativeCli: true,
@@ -103,7 +103,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'core',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.8.0',
+    version: '0.9.0',
     defaultModelConfig: platformModel(),
     nativeCli: { install: 'npm i -g @mariozechner/pi-coding-agent', bin: 'pi' },
     driveNativeCli: true,
@@ -120,7 +120,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'coding',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.7.0',
+    version: '0.9.0',
     defaultModelConfig: subscriptionSkeleton('claude_code'),
     nativeCli: { install: 'npm i -g @anthropic-ai/claude-code', bin: 'claude' },
     driveNativeCli: true,
@@ -137,7 +137,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'coding',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.8.0',
+    version: '0.9.0',
     defaultModelConfig: subscriptionSkeleton('codex'),
     nativeCli: { install: 'npm i -g @openai/codex', bin: 'codex' },
     driveNativeCli: true,
@@ -154,7 +154,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'coding',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.8.0',
+    version: '0.9.0',
     defaultModelConfig: subscriptionSkeleton('opencode'),
     nativeCli: { install: 'npm i -g opencode-ai', bin: 'opencode' },
     driveNativeCli: true,
@@ -232,7 +232,7 @@ export async function invoke(payload) {
   const turns = Array.isArray(history) ? history : [];
   const lastUser = [...turns].reverse().find((t) => t.role === 'user') || { content: '' };
   const prior = turns.slice(0, Math.max(0, turns.length - 1)).map((t) => (t.role === 'user' ? 'User' : 'Assistant') + ': ' + t.content).join('\\n');
-  const toolsNote = 'You have Cirrus platform tools (MCP, prefixed cirrus_): post_message (send the user a short progress update mid-task, then keep working), ask_user (ask a question with quick-reply buttons, then stop and wait), send_image, and cron tools (list/create/update/delete scheduled tasks). Use post_message during longer work so the user sees progress.';
+  const toolsNote = 'You have Cirrus platform tools (MCP, prefixed cirrus_): post_message (send the user a short progress update mid-task, then keep working), ask_user (ask a question with quick-reply buttons, then stop and wait), send_image, and cron tools (list/create/update/delete scheduled tasks). Use post_message during longer work so the user sees progress. IMPORTANT: whenever you offer the user a choice among specific options (e.g. pick one of several items), you MUST call ask_user with those options as quick-reply buttons instead of listing them as plain text.';
   const message = toolsNote + '\\n\\n' + (prior ? '<conversation_so_far>\\n' + prior + '\\n</conversation_so_far>\\n\\n' : '') + (lastUser.content || '');
 
   const emit = (k, t) => { try { console.log('__CIRRUS_EVENT__' + JSON.stringify({ k: k, t: t })); } catch (e) {} };
@@ -326,7 +326,7 @@ export async function invoke(payload) {
   const turns = Array.isArray(history) ? history : [];
   const lastUser = [...turns].reverse().find((t) => t.role === 'user') || { content: '' };
   const prior = turns.slice(0, Math.max(0, turns.length - 1)).map((t) => (t.role === 'user' ? 'User' : 'Assistant') + ': ' + t.content).join('\\n');
-  const toolsNote = 'You have Cirrus platform tools (MCP, prefixed cirrus_): post_message (send the user a progress update mid-task), ask_user (ask with quick-reply buttons then stop), send_image, and cron tools. Use post_message during longer work.';
+  const toolsNote = 'You have Cirrus platform tools (MCP, prefixed cirrus_): post_message (send the user a progress update mid-task), ask_user (ask with quick-reply buttons then stop), send_image, and cron tools. Use post_message during longer work. IMPORTANT: whenever you offer the user a choice among specific options (e.g. pick one of several items), you MUST call ask_user with those options as quick-reply buttons instead of listing them as plain text.';
   const message = toolsNote + '\\n\\n' + (prior ? '<conversation_so_far>\\n' + prior + '\\n</conversation_so_far>\\n\\n' : '') + (lastUser.content || '');
 
   let evtOffset = 0;
@@ -413,7 +413,7 @@ export async function invoke(payload) {
   const turns = Array.isArray(history) ? history : [];
   const lastUser = [...turns].reverse().find((t) => t.role === 'user') || { content: '' };
   const prior = turns.slice(0, Math.max(0, turns.length - 1)).map((t) => (t.role === 'user' ? 'User' : 'Assistant') + ': ' + t.content).join('\\n');
-  const toolsNote = 'You have Cirrus platform tools (MCP, prefixed cirrus_): post_message (send the user a progress update mid-task), ask_user (ask with quick-reply buttons then stop), send_image, and cron tools. Use post_message during longer work.';
+  const toolsNote = 'You have Cirrus platform tools (MCP, prefixed cirrus_): post_message (send the user a progress update mid-task), ask_user (ask with quick-reply buttons then stop), send_image, and cron tools. Use post_message during longer work. IMPORTANT: whenever you offer the user a choice among specific options (e.g. pick one of several items), you MUST call ask_user with those options as quick-reply buttons instead of listing them as plain text.';
   const message = toolsNote + '\\n\\n' + (prior ? '<conversation_so_far>\\n' + prior + '\\n</conversation_so_far>\\n\\n' : '') + (lastUser.content || '');
 
   let evtOffset = 0;
@@ -498,7 +498,7 @@ export async function invoke(payload) {
   const turns = Array.isArray(history) ? history : [];
   const lastUser = [...turns].reverse().find((t) => t.role === 'user') || { content: '' };
   const prior = turns.slice(0, Math.max(0, turns.length - 1)).map((t) => (t.role === 'user' ? 'User' : 'Assistant') + ': ' + t.content).join('\\n');
-  const toolsNote = 'You have Cirrus platform tools (MCP, prefixed cirrus_): post_message (send the user a progress update mid-task), ask_user (ask with quick-reply buttons then stop), send_image, and cron tools. Use post_message during longer work.';
+  const toolsNote = 'You have Cirrus platform tools (MCP, prefixed cirrus_): post_message (send the user a progress update mid-task), ask_user (ask with quick-reply buttons then stop), send_image, and cron tools. Use post_message during longer work. IMPORTANT: whenever you offer the user a choice among specific options (e.g. pick one of several items), you MUST call ask_user with those options as quick-reply buttons instead of listing them as plain text.';
   const message = toolsNote + '\\n\\n' + (prior ? '<conversation_so_far>\\n' + prior + '\\n</conversation_so_far>\\n\\n' : '') + (lastUser.content || '');
   const outFile = '/tmp/cirrus-codex-' + Date.now() + '.txt';
 
@@ -592,7 +592,7 @@ export async function invoke(payload) {
   const turns = Array.isArray(history) ? history : [];
   const lastUser = [...turns].reverse().find((t) => t.role === 'user') || { content: '' };
   const prior = turns.slice(0, Math.max(0, turns.length - 1)).map((t) => (t.role === 'user' ? 'User' : 'Assistant') + ': ' + t.content).join('\\n');
-  const toolsNote = 'You have Cirrus platform tools (MCP, prefixed mcp__cirrus__): post_message (send the user a progress update mid-task), ask_user (ask with quick-reply buttons then stop), send_image, and cron tools. Use post_message during longer work.';
+  const toolsNote = 'You have Cirrus platform tools (MCP, prefixed mcp__cirrus__): post_message (send the user a progress update mid-task), ask_user (ask with quick-reply buttons then stop), send_image, and cron tools. Use post_message during longer work. IMPORTANT: whenever you offer the user a choice among specific options (e.g. pick one of several items), you MUST call ask_user with those options as quick-reply buttons instead of listing them as plain text.';
   const message = toolsNote + '\\n\\n' + (prior ? '<conversation_so_far>\\n' + prior + '\\n</conversation_so_far>\\n\\n' : '') + (lastUser.content || '');
 
   let evtOffset = 0;
@@ -684,7 +684,7 @@ export async function invoke(payload) {
   const turns = Array.isArray(history) ? history : [];
   const lastUser = [...turns].reverse().find((t) => t.role === 'user') || { content: '' };
   const prior = turns.slice(0, Math.max(0, turns.length - 1)).map((t) => (t.role === 'user' ? 'User' : 'Assistant') + ': ' + t.content).join('\\n');
-  const toolsNote = 'You have Cirrus platform tools (MCP, prefixed mcp_cirrus_): post_message (send the user a progress update mid-task), ask_user (ask with quick-reply buttons then stop), send_image, and cron tools. Use post_message during longer work.';
+  const toolsNote = 'You have Cirrus platform tools (MCP, prefixed mcp_cirrus_): post_message (send the user a progress update mid-task), ask_user (ask with quick-reply buttons then stop), send_image, and cron tools. Use post_message during longer work. IMPORTANT: whenever you offer the user a choice among specific options (e.g. pick one of several items), you MUST call ask_user with those options as quick-reply buttons instead of listing them as plain text.';
   const message = toolsNote + '\\n\\n' + (prior ? '<conversation_so_far>\\n' + prior + '\\n</conversation_so_far>\\n\\n' : '') + (lastUser.content || '');
 
   let evtOffset = 0;

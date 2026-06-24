@@ -381,6 +381,16 @@ export async function planSkills(id: string): Promise<SkillPlanResult> {
   return json<SkillPlanResult>(await fetch(`/api/miniapps/${id}/skills/plan`, { method: 'POST' }))
 }
 
+export async function analyzeSkill(description: string): Promise<{ skill: MiniappSkill; summary: string }> {
+  return json<{ skill: MiniappSkill; summary: string }>(
+    await fetch('/api/skills/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description }),
+    }),
+  )
+}
+
 export async function developSkill(
   id: string,
   skillId: string,

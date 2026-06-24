@@ -5,11 +5,12 @@ import { saveRecord, loadRecord } from '../store.ts'
 import { writeAgentFile, readAgentFile } from '../agentfs.ts'
 import { getSandboxDriver } from '../sandbox/index.ts'
 import { planSkills } from './planner.ts'
-import { findPlatformSkill } from './library.ts'
+import { findPlatformSkill, matchPlatformSkill, PLATFORM_SKILLS } from './library.ts'
 import { developerSkillPrompt } from '../agent/developerSkills.ts'
 import type {
   MiniappRecord,
   MiniappSkill,
+  SkillCategory,
   SkillCredentialField,
   SkillDevelopMethod,
   SkillPlan,
@@ -77,6 +78,160 @@ export async function planAndAttachSkills(record: MiniappRecord): Promise<PlanRe
     skills,
     autoAdded: skills.filter((s) => s.status === 'active').length,
     needsDev: skills.filter((s) => s.status === 'needs_dev').length,
+  }
+}
+
+const ANALYZE_CATEGORIES: SkillCategory[] = ['data', 'tool', 'connector', 'trigger', 'ai']
+
+export interface AnalyzeSkillResult {
+  skill: MiniappSkill
+  summary: string
+}
+
+/** Turn a free-text "what skill I want" description into a drafted skill: a clean
+ *  name, category, refined description, and an initial set of tool calls/credentials
+ *  (its first version). If it matches a platform library skill, return that instead. */
+export async function analyzeSkill(description: string): Promise<AnalyzeSkillResult> {
+  const goal = description.trim()
+  const fallbackName = goal.length > 36 ? goal.slice(0, 36) + '…' : goal || 'Custom skill'
+  const draftTool: OpenAI.Chat.Completions.ChatCompletionTool = {
+    type: 'function',
+    function: {
+      name: 'draft_skill',
+      description: 'Draft a single agent skill from the creator’s description.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'A short, clear skill name (2-4 words, Title Case).' },
+          category: { type: 'string', enum: ANALYZE_CATEGORIES },
+          description: { type: 'string', description: 'One or two sentences describing what the skill does.' },
+          platformSkillId: {
+            type: 'string',
+            description: 'The id of the matching platform library skill, or "" if the platform has none.',
+          },
+          tools: {
+            type: 'array',
+            description: 'The initial tool calls this skill exposes (usually 1-3). Each is a concrete function the agent can call.',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'snake_case function name.' },
+                description: { type: 'string' },
+                parameters: { type: 'object', description: 'JSON Schema for the tool arguments.' },
+              },
+              required: ['name', 'description'],
+            },
+          },
+          credentials: {
+            type: 'array',
+            description: 'Any credentials/config the skill needs (API keys, endpoints). Omit if none.',
+            items: {
+              type: 'object',
+              properties: {
+                key: { type: 'string' },
+                label: { type: 'string' },
+                secret: { type: 'boolean' },
+                type: { type: 'string', enum: ['text', 'password', 'select', 'textarea'] },
+                placeholder: { type: 'string' },
+                required: { type: 'boolean' },
+              },
+              required: ['key', 'label'],
+            },
+          },
+          summary: { type: 'string', description: 'One short line on what you drafted and what to finish next.' },
+        },
+        required: ['name', 'category', 'description'],
+      },
+    },
+  }
+
+  const system = [
+    'You are the Cirrus skill analyzer. The creator describes a capability they want their agent to have.',
+    'Analyze it and draft ONE skill: a clear name, the right category, a refined description, and an initial',
+    'set of concrete tool calls (its first version) plus any credentials it needs.',
+    '',
+    'If an existing platform library skill already covers it, set platformSkillId to that id and keep tools minimal',
+    '(the library skill ships its own contract). Otherwise set platformSkillId to "" and draft 1-3 tool calls the',
+    'agent would call to use this skill. Do NOT draft tools for things the agent already does with its own reasoning',
+    '(summarizing, classifying, writing) — only for external data/services/APIs.',
+    '',
+    'Platform Skills Library:',
+    ...PLATFORM_SKILLS.map((s) => `- ${s.id} (${s.category}): ${s.description}`),
+  ].join('\n')
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: config.model,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: `Skill the creator wants:\n${goal}\n\nCall draft_skill.` },
+      ] as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+      tools: [draftTool],
+      tool_choice: { type: 'function', function: { name: 'draft_skill' } },
+      max_completion_tokens: 1200,
+    })
+    const call = completion.choices[0]?.message?.tool_calls?.[0]
+    const args = (call?.type === 'function' && call.function.arguments ? JSON.parse(call.function.arguments) : {}) as Record<string, unknown>
+
+    const rawId = typeof args.platformSkillId === 'string' ? args.platformSkillId.trim() : ''
+    const matched = (rawId && findPlatformSkill(rawId)) || matchPlatformSkill(`${goal} ${String(args.name ?? '')}`)
+    if (matched) {
+      return {
+        skill: {
+          id: newSkillId(),
+          name: String(args.name ?? matched.name) || matched.name,
+          category: matched.category,
+          description: String(args.description ?? matched.description) || matched.description,
+          source: 'library',
+          kind: 'builtin',
+          status: 'active',
+          platformSkillId: matched.id,
+          tools: matched.tools ?? [],
+          credentials: matched.credentials ?? [],
+          credentialsFilled: [],
+          config: matched.config ? { ...matched.config } : undefined,
+        },
+        summary: String(args.summary ?? `Matched the “${matched.name}” platform skill — ready to use once connected.`),
+      }
+    }
+
+    const category: SkillCategory = ANALYZE_CATEGORIES.includes(args.category as SkillCategory) ? (args.category as SkillCategory) : 'tool'
+    const tools = Array.isArray(args.tools) ? args.tools.map(sanitizeTool).filter((t): t is SkillToolCall => !!t) : []
+    const credentials = Array.isArray(args.credentials)
+      ? args.credentials.map(sanitizeCredential).filter((c): c is SkillCredentialField => !!c)
+      : []
+    return {
+      skill: {
+        id: newSkillId(),
+        name: String(args.name ?? fallbackName) || fallbackName,
+        category,
+        description: String(args.description ?? goal) || goal,
+        source: 'generated',
+        kind: 'custom',
+        status: 'needs_dev',
+        tools,
+        credentials,
+        config: { suggestedMethods: ['generate', 'integrate'], draftedFrom: goal },
+      },
+      summary: String(args.summary ?? 'Drafted an initial version — generate the code to make it live.'),
+    }
+  } catch {
+    // Relay/model unavailable: fall back to the old behavior so the flow still works.
+    return {
+      skill: {
+        id: newSkillId(),
+        name: fallbackName,
+        category: 'tool',
+        description: goal,
+        source: 'generated',
+        kind: 'custom',
+        status: 'needs_dev',
+        tools: [],
+        credentials: [],
+        config: { suggestedMethods: ['generate', 'integrate'], draftedFrom: goal },
+      },
+      summary: 'Created a draft from your description.',
+    }
   }
 }
 
