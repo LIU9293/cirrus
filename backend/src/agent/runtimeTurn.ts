@@ -3,7 +3,7 @@ import type { DeveloperChatMessage, MiniappRecord, RuntimeAgentRef, RuntimeRecor
 import type { RuntimeMessageUi } from './skillTools.ts'
 import { loadRecord } from '../store.ts'
 import { saveRuntime } from '../runtimeStore.ts'
-import { communityAgentDefinition, installCommunityAgentInSandbox, normalizeRuntimeAgentRef } from '../communityAgents.ts'
+import { communityAgentNeedsInstall, installCommunityAgentInSandbox, normalizeRuntimeAgentRef, type CommunityStreamEvent } from '../communityAgents.ts'
 import {
   decideCirrusRuntimeRouting,
   describeCirrusRuntimeAgentSpecsForRuntime,
@@ -28,11 +28,9 @@ export async function installRuntimeCommunityAgents(runtime: RuntimeRecord): Pro
       agents.push(agent)
       continue
     }
-    // Reinstall when the registry adapter version has moved past what's installed,
-    // so capability changes (e.g. shell tools) reach already-provisioned runtimes.
-    const registryVersion = communityAgentDefinition(agent.key)?.version
-    const upToDate = !registryVersion || agent.installation?.version === registryVersion
-    if (agent.installation?.status === 'ready' && upToDate) {
+    // Reinstall when not ready OR when the registry adapter version moved past
+    // what's installed, so capability changes reach already-provisioned runtimes.
+    if (!communityAgentNeedsInstall(agent)) {
       agents.push(agent)
       continue
     }
@@ -75,6 +73,8 @@ export interface RuntimeTurnOptions {
   persist?: boolean
   /** Prefix stamped on the persisted user message id (e.g. 'cron'). */
   idPrefix?: string
+  /** Live stream sink for community-agent replies (delta tokens + post_message). */
+  onStream?: (ev: CommunityStreamEvent) => void
 }
 
 /**
@@ -93,7 +93,7 @@ export async function executeRuntimeTurn(
   if (
     runtime.sandboxKind === 'e2b' &&
     runtime.sandboxId &&
-    runtime.agents.some((agent) => agent.source === 'community' && agent.installation?.status !== 'ready')
+    runtime.agents.some(communityAgentNeedsInstall)
   ) {
     runtime = await installRuntimeCommunityAgents(runtime)
   }
@@ -142,6 +142,7 @@ export async function executeRuntimeTurn(
       agentSpecs,
       route,
       platform: { runtimeId: runtime.id, ownerId: runtime.ownerId, agents: runtime.agents.map((a) => ({ key: a.key, name: a.name })) },
+      onEvent: opts.onStream,
     })
     message = outcome.message
     activities = outcome.activities ?? []

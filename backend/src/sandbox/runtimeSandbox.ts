@@ -1,3 +1,5 @@
+import { config } from '../config.ts'
+
 // Persistent sandbox lifecycle for Runtimes.
 //
 // Unlike the ephemeral SandboxDriver (sandbox/index.ts) — which spins a sandbox
@@ -54,6 +56,8 @@ export async function provisionRuntimeSandbox(): Promise<ProvisionResult> {
   try {
     const sbx = await Sandbox.create({
       ...e2bOpts(),
+      // Custom template with the community-agent CLIs baked in (zero install wait).
+      template: config.runtimeSandboxTemplate,
       timeoutMs: SANDBOX_TTL_MS,
       lifecycle: { onTimeout: 'pause', autoResume: true },
     })
@@ -68,7 +72,7 @@ export async function provisionRuntimeSandbox(): Promise<ProvisionResult> {
 export async function runInRuntimeSandbox(
   sandboxId: string,
   code: string,
-  opts?: { timeoutMs?: number },
+  opts?: { timeoutMs?: number; onStdout?: (line: string) => void },
 ): Promise<{ ok: boolean; stdout: string; stderr: string; error?: string }> {
   const Sandbox = await loadE2B()
   if (!Sandbox) return { ok: false, stdout: '', stderr: '', error: 'E2B unavailable.' }
@@ -76,7 +80,12 @@ export async function runInRuntimeSandbox(
     const sbx = await Sandbox.connect(sandboxId, e2bConnectOpts())
     // Refresh the idle timeout on use.
     await sbx.setTimeout?.(SANDBOX_TTL_MS)
-    const exec = await sbx.runCode(code, { language: 'js', timeoutMs: opts?.timeoutMs ?? 30_000 })
+    const exec = await sbx.runCode(code, {
+      language: 'js',
+      timeoutMs: opts?.timeoutMs ?? 30_000,
+      // Forward stdout lines live so callers can stream model output as it arrives.
+      ...(opts?.onStdout ? { onStdout: (o: { line?: string }) => { try { opts.onStdout!(o?.line ?? String(o)) } catch {} } } : {}),
+    })
     const stdout = (exec.logs?.stdout ?? []).join('\n')
     const stderr = (exec.logs?.stderr ?? []).join('\n')
     return { ok: !exec.error, stdout, stderr, error: exec.error ? String(exec.error.value ?? exec.error) : undefined }

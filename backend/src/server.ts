@@ -27,7 +27,7 @@ import { getSandboxDriver } from './sandbox/index.ts'
 import { createRuntime, deleteRuntime, listRuntimes, listAllRuntimes, loadRuntime, saveRuntime } from './runtimeStore.ts'
 import { getRuntimeSandboxStatus, provisionRuntimeSandbox } from './sandbox/runtimeSandbox.ts'
 import { startScheduler } from './scheduler.ts'
-import { normalizeRuntimeAgentRef } from './communityAgents.ts'
+import { normalizeRuntimeAgentRef, type CommunityStreamEvent } from './communityAgents.ts'
 import { clarifyConcept } from './define/clarify.ts'
 import { agentImportDataset, loadDataset, queryDataset, listTables } from './datastore/load.ts'
 import { diagnoseRuntimeGmail, diagnoseRuntimeNetwork } from './runtimeDiagnostics.ts'
@@ -134,10 +134,20 @@ app.post('/api/public/runtimes/:id/chat', async (req, res) => {
   emit({ type: 'status', text: 'Working with CirrusRuntimeAgent…' })
   try {
     const history = (req.body?.history ?? []) as ChatTurn[]
-    const { message, activities, durationMs, ui, posts } = await executeRuntimeTurn(runtime, history, { persist: false })
+    // Stream community-agent output live: delta = a chunk of the reply, post = a
+    // standalone post_message. `streamed` guards against re-emitting them below.
+    let streamed = false
+    const onStream = (ev: CommunityStreamEvent) => {
+      streamed = true
+      if (ev.kind === 'delta') emit({ type: 'assistant', text: ev.text })
+      else emit({ type: 'message', text: ev.text })
+    }
+    const { message, activities, durationMs, ui, posts } = await executeRuntimeTurn(runtime, history, { persist: false, onStream })
     for (const activity of activities) emit(activityToEvent(activity))
-    for (const post of posts ?? []) emit({ type: 'message', text: post })
-    for (const chunk of assistantChunks(message)) emit({ type: 'assistant', text: chunk })
+    if (!streamed) {
+      for (const post of posts ?? []) emit({ type: 'message', text: post })
+      for (const chunk of assistantChunks(message)) emit({ type: 'assistant', text: chunk })
+    }
     for (const image of ui?.images ?? []) emit({ type: 'image', url: image.url, alt: image.alt })
     if (ui?.choices?.length) emit({ type: 'choices', choices: ui.choices, allowFreeText: ui.allowFreeText })
     emit({ type: 'done', durationMs })
@@ -602,9 +612,39 @@ app.post('/api/miniapps/:id/chat', async (req, res) => {
   }
 })
 
+// Per-miniapp action queue. Two actions on the same miniapp must not run
+// concurrently: an agent action (e.g. record_answer) runs a slow LLM/sandbox
+// loop on a state snapshot, then saves the WHOLE state back. If a newer action
+// (e.g. load_question) finishes first, the slow one lands last and clobbers it
+// — the UI "jumps back" to the previous state. Serializing load→run→save per
+// record makes each action read the latest persisted state. In-process; assumes
+// a single backend instance (true for the current Railway deploy).
+const miniappActionChains = new Map<string, Promise<unknown>>()
+
+function withMiniappActionLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const prior = miniappActionChains.get(id) ?? Promise.resolve()
+  const result = prior.then(fn, fn) // run after the prior action settles, success or failure
+  // Store a non-rejecting tail so one failed action doesn't poison the queue.
+  const tail = result.then(() => {}, () => {})
+  miniappActionChains.set(id, tail)
+  // Drop the entry once this is the last queued action, to bound map growth.
+  void tail.finally(() => { if (miniappActionChains.get(id) === tail) miniappActionChains.delete(id) })
+  return result
+}
+
 // Host action handler. Called by the frontend host when the iframe posts an action
 // through the bridge. Returns the new state so the host can push it to the frame.
+// Serialized per miniapp, and re-reads the record inside the lock so each action
+// acts on the latest persisted state (never a snapshot taken before a concurrent
+// action finished saving).
 async function runMiniappHostAction(record: MiniappRecord, actionId: string, payload: unknown) {
+  return withMiniappActionLock(record.id, async () => {
+    const fresh = (await loadRecord(record.id)) ?? record
+    return runMiniappHostActionInner(fresh, actionId, payload)
+  })
+}
+
+async function runMiniappHostActionInner(record: MiniappRecord, actionId: string, payload: unknown) {
   if (actionId === SET_STATE_ACTION) {
     const patch = (payload as { patch?: unknown }).patch
     if (!isPlainObject(patch)) {
@@ -790,12 +830,24 @@ app.post('/api/runtimes/:id/chat', async (req, res) => {
   }
 
   const history = (req.body?.history ?? []) as ChatTurn[]
-  const { message, activities, durationMs, ui, posts } = await executeRuntimeTurn(runtime, history, { persist: true })
+  // When streaming, forward community-agent deltas/posts live; `streamed` guards
+  // against re-emitting the same text after the turn completes.
+  let streamed = false
+  const onStream = wantsStream
+    ? (ev: CommunityStreamEvent) => {
+        streamed = true
+        if (ev.kind === 'delta') emit({ type: 'assistant', text: ev.text })
+        else emit({ type: 'message', text: ev.text })
+      }
+    : undefined
+  const { message, activities, durationMs, ui, posts } = await executeRuntimeTurn(runtime, history, { persist: true, onStream })
 
   if (wantsStream) {
     for (const activity of activities) emit(activityToEvent(activity))
-    for (const post of posts ?? []) emit({ type: 'message', text: post })
-    for (const chunk of assistantChunks(message)) emit({ type: 'assistant', text: chunk })
+    if (!streamed) {
+      for (const post of posts ?? []) emit({ type: 'message', text: post })
+      for (const chunk of assistantChunks(message)) emit({ type: 'assistant', text: chunk })
+    }
     for (const image of ui?.images ?? []) emit({ type: 'image', url: image.url, alt: image.alt })
     if (ui?.choices?.length) emit({ type: 'choices', choices: ui.choices, allowFreeText: ui.allowFreeText })
     emit({ type: 'done', durationMs })

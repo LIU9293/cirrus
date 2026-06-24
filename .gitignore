@@ -6,3 +6,7 @@ dist/
 backend/data/miniapps/
 miniapp-runtime/src/app/
 !miniapp-runtime/src/app/App.tsx
+
+# local DB sync backups (production data snapshots — never commit)
+.local-db-backup-*.sql
+backend/.local-db-backup-*.sql

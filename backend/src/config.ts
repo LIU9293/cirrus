@@ -28,6 +28,9 @@ export const config = {
   baseURL: process.env.OPENAI_BASE_URL ?? 'https://ai-relay.chainbot.io/v1',
   apiKey: process.env.OPENAI_API_KEY ?? '',
   model: process.env.MINIAPP_MODEL ?? 'gpt-5.5',
+  /** Custom E2B template (built by scripts/buildRuntimeTemplate.ts) with all six
+   *  community-agent CLIs baked in, so sandboxes start with them present. */
+  runtimeSandboxTemplate: process.env.RUNTIME_SANDBOX_TEMPLATE ?? 'cirrus-runtime',
   port: Number(process.env.PORT ?? 3000),
   // Repo roots, resolved from backend/src.
   repoRoot: resolve(here, '..', '..'),

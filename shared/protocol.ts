@@ -413,6 +413,8 @@ export interface RuntimeAgentInstallation {
   installedAt?: string
   error?: string | null
   logs?: string[]
+  /** Result of installing the agent's real upstream CLI into the sandbox. */
+  nativeCli?: { installed: boolean; bin: string; version?: string; path?: string; error?: string }
 }
 
 /** Per-skill setting values bound for one agent inside one runtime. Non-secret

@@ -31,6 +31,10 @@ export interface CommunityAgentDefinition {
   category: 'framework' | 'browser' | 'core' | 'coding'
   /** Whether the agent gets sandbox filesystem + shell tools (run_command, etc.). */
   shell: boolean
+  /** The agent's real upstream CLI. We install it into the sandbox (step 1); a
+   *  later step will drive it instead of the platform-model adapter. `risky` marks
+   *  install scripts from less-certain sources (curl|bash) worth reviewing. */
+  nativeCli?: { install: string; bin: string; versionCmd?: string; risky?: boolean }
   adapter: 'platform-llm-adapter'
   version: string
   defaultModelConfig: RuntimeAgentModelConfig
@@ -60,8 +64,9 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'framework',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.4.0',
+    version: '0.6.0',
     defaultModelConfig: platformModel(),
+    nativeCli: { install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash', bin: 'hermes', risky: true },
     capabilities: ['multi-agent coordination', 'workflow planning', 'handoff routing', 'status synthesis'],
     systemPrompt:
       'You are Hermes, a runtime coordination agent. Focus on decomposing requests, assigning work to available agents, and explaining orchestration decisions clearly.',
@@ -74,8 +79,9 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'framework',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.4.0',
+    version: '0.6.0',
     defaultModelConfig: platformModel(),
+    nativeCli: { install: "curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash", bin: 'clawbot', risky: true },
     capabilities: ['browser task planning', 'website automation planning', 'DOM/action reasoning'],
     systemPrompt:
       'You are OpenClaw, a web automation agent. Help plan browser actions and explain safe website automation steps. Do not claim to click external sites unless a browser tool is explicitly connected.',
@@ -88,8 +94,9 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'core',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.4.0',
+    version: '0.6.0',
     defaultModelConfig: platformModel(),
+    nativeCli: { install: 'npm i -g @mariozechner/pi-coding-agent', bin: 'pi' },
     capabilities: ['tool calling patterns', 'agent loop design', 'structured reasoning'],
     systemPrompt:
       'You are Pi Agent, a compact tool-calling runtime agent. Emphasize structured tool contracts, minimal loops, and practical agent execution.',
@@ -102,8 +109,9 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'coding',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.4.0',
+    version: '0.6.0',
     defaultModelConfig: subscriptionSkeleton('claude_code'),
+    nativeCli: { install: 'npm i -g @anthropic-ai/claude-code', bin: 'claude' },
     capabilities: ['codebase reasoning', 'patch planning', 'terminal workflow guidance'],
     systemPrompt:
       'You are Claude Code in a Cirrus runtime adapter. Help with software-engineering tasks, code navigation, patch plans, and terminal-oriented workflows. Mention when native subscription auth is not connected.',
@@ -116,8 +124,9 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'coding',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.4.0',
+    version: '0.6.0',
     defaultModelConfig: subscriptionSkeleton('codex'),
+    nativeCli: { install: 'npm i -g @openai/codex', bin: 'codex' },
     capabilities: ['software engineering', 'repo inspection', 'implementation planning', 'test strategy'],
     systemPrompt:
       'You are Codex in a Cirrus runtime adapter. Act as a pragmatic software-engineering agent. Mention when native Codex login/subscription auth is not connected.',
@@ -130,8 +139,9 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'coding',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.4.0',
+    version: '0.6.0',
     defaultModelConfig: subscriptionSkeleton('opencode'),
+    nativeCli: { install: 'npm i -g opencode-ai', bin: 'opencode' },
     capabilities: ['coding workflows', 'CLI-oriented engineering guidance', 'open-source agent operations'],
     systemPrompt:
       'You are OpenCode in a Cirrus runtime adapter. Help with coding tasks and CLI-oriented development. Mention when native OpenCode auth/install is not connected.',
@@ -141,6 +151,16 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
 
 export function communityAgentDefinition(key: string): CommunityAgentDefinition | null {
   return COMMUNITY_AGENT_REGISTRY[key] ?? null
+}
+
+/** A community agent needs (re)installation when it isn't ready, or when the
+ *  registry adapter version has moved past what's installed (so capability
+ *  changes — shell, streaming, … — reach already-provisioned runtimes). */
+export function communityAgentNeedsInstall(agent: RuntimeAgentRef): boolean {
+  if (agent.source !== 'community') return false
+  if (agent.installation?.status !== 'ready') return true
+  const registryVersion = communityAgentDefinition(agent.key)?.version
+  return !!registryVersion && agent.installation?.version !== registryVersion
 }
 
 export function defaultRuntimeAgentModelConfig(agent: Pick<RuntimeAgentRef, 'key' | 'source'>): RuntimeAgentModelConfig {
@@ -199,25 +219,19 @@ export async function invoke(payload) {
   const acc = { ui: {}, cronRequests: [], posts: [] };
   const tools = [...platformTools(), ...(shell ? codingTools() : [])];
   const done = (msg) => ({ ok: true, reply: msg, ui: acc.ui, cronRequests: acc.cronRequests, posts: acc.posts });
+  // Stream events to stdout so the host can forward them live. Each event is ONE
+  // line: __CIRRUS_EVENT__<json>. The wrapper still prints the final result object
+  // as the last (non-event) stdout line. JSON.stringify keeps each event single-line.
+  const emit = (k, t) => { try { console.log('__CIRRUS_EVENT__' + JSON.stringify({ k: k, t: t })); } catch (e) {} };
+  acc.emit = emit;
+  let fullText = '';
 
   for (let i = 0; i < (shell ? 14 : 6); i += 1) {
-    const res = await fetch(model.endpoint, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + model.apiKey },
-      body: JSON.stringify({
-        model: model.id,
-        messages,
-        tools,
-        tool_choice: 'auto',
-        max_completion_tokens: shell ? 1800 : 1000,
-      })
-    });
-    const data = await res.json();
-    if (!res.ok) return { ok: false, error: JSON.stringify(data).slice(0, 1200) };
-    const msg = data?.choices?.[0]?.message ?? {};
-    const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
-    messages.push({ role: 'assistant', content: msg.content ?? '', ...(toolCalls.length ? { tool_calls: toolCalls } : {}) });
-    if (!toolCalls.length) return done(msg.content ?? '');
+    const turn = await streamChatCompletion(model, messages, tools, shell ? 1800 : 1000, function (d) { fullText += d; emit('delta', d); });
+    if (turn.error) return { ok: false, error: String(turn.error).slice(0, 1200) };
+    const toolCalls = Array.isArray(turn.toolCalls) ? turn.toolCalls : [];
+    messages.push({ role: 'assistant', content: turn.content ?? '', ...(toolCalls.length ? { tool_calls: toolCalls } : {}) });
+    if (!toolCalls.length) return done(fullText);
     let asked = false;
     for (const call of toolCalls) {
       const result = await runTool(call.function?.name, call.function?.arguments, payload, acc);
@@ -225,9 +239,63 @@ export async function invoke(payload) {
       messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result).slice(0, 12000) });
     }
     // ask_user ends the turn so the user can respond.
-    if (asked) return done(msg.content ?? '');
+    if (asked) return done(fullText);
   }
-  return done('Stopped after the maximum tool iterations.');
+  return done(fullText || 'Stopped after the maximum tool iterations.');
+}
+
+// Streaming chat completion. Calls onDelta(text) for each content token as it
+// arrives and reconstructs tool_calls from the SSE deltas. Falls back to a single
+// JSON read if the endpoint doesn't return a streamable body.
+async function streamChatCompletion(model, messages, tools, maxTokens, onDelta) {
+  let res;
+  try {
+    res = await fetch(model.endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + model.apiKey },
+      body: JSON.stringify({ model: model.id, messages, tools, tool_choice: 'auto', max_completion_tokens: maxTokens, stream: true })
+    });
+  } catch (e) { return { error: String(e && e.message || e) }; }
+  if (!res.ok) { let t = ''; try { t = await res.text(); } catch (e) {} return { error: 'HTTP ' + res.status + ' ' + t }; }
+  if (!res.body || !res.body.getReader) {
+    const data = await res.json();
+    const msg = (data && data.choices && data.choices[0] && data.choices[0].message) || {};
+    if (typeof msg.content === 'string' && msg.content) onDelta(msg.content);
+    return { content: msg.content || '', toolCalls: Array.isArray(msg.tool_calls) ? msg.tool_calls : [] };
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  let content = '';
+  const toolMap = {};
+  while (true) {
+    const r = await reader.read();
+    if (r.done) break;
+    buf += dec.decode(r.value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf('\\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line || line.slice(0, 5) !== 'data:') continue;
+      const payload = line.slice(5).trim();
+      if (payload === '[DONE]') continue;
+      let evt; try { evt = JSON.parse(payload); } catch (e) { continue; }
+      const delta = evt && evt.choices && evt.choices[0] && evt.choices[0].delta;
+      if (!delta) continue;
+      if (typeof delta.content === 'string' && delta.content) { content += delta.content; onDelta(delta.content); }
+      if (Array.isArray(delta.tool_calls)) {
+        for (const tc of delta.tool_calls) {
+          const idx = tc.index != null ? tc.index : 0;
+          const cur = toolMap[idx] || (toolMap[idx] = { id: '', type: 'function', function: { name: '', arguments: '' } });
+          if (tc.id) cur.id = tc.id;
+          if (tc.function && tc.function.name) cur.function.name += tc.function.name;
+          if (tc.function && tc.function.arguments) cur.function.arguments += tc.function.arguments;
+        }
+      }
+    }
+  }
+  const toolCalls = Object.keys(toolMap).sort(function (a, b) { return Number(a) - Number(b); }).map(function (k) { return toolMap[k]; }).filter(function (c) { return c.function.name; });
+  return { content: content, toolCalls: toolCalls };
 }
 
 function platformTools() {
@@ -284,6 +352,7 @@ async function runTool(name, rawArgs, payload, acc) {
     const text = String(args.text || '').trim();
     if (!text) return { ok: false, error: 'text is required' };
     acc.posts.push(text);
+    if (acc.emit) acc.emit('post', text);
     return { ok: true, posted: true, note: 'Sent to the user. Keep working — do not repeat this in your final reply.' };
   }
   if (name === 'send_image') {
@@ -377,15 +446,32 @@ function installCode(definition: CommunityAgentDefinition): string {
     installNotes: definition.installNotes,
   }
   const invokeSource = invokeSourceFor(definition)
+  const cli = definition.nativeCli ?? null
   return [
     `await (async () => {`,
     `  const fs = await import('node:fs/promises');`,
     `  const os = await import('node:os');`,
+    `  const cproc = await import('node:child_process');`,
     `  const dir = ${JSON.stringify(dir)};`,
     `  await fs.mkdir(dir, { recursive: true });`,
     `  await fs.writeFile(dir + '/agent.json', ${JSON.stringify(JSON.stringify(manifest, null, 2))});`,
     `  await fs.writeFile(dir + '/invoke.mjs', ${JSON.stringify(invokeSource)});`,
-    `  console.log(JSON.stringify({ ok: true, host: os.hostname(), dir, manifest: ${JSON.stringify(manifest)} }));`,
+    // Install the agent's real upstream CLI (step 1). Non-fatal: the platform-model
+    // adapter still serves the agent, so a CLI install failure just gets recorded.
+    `  let cli = null;`,
+    `  const spec = ${JSON.stringify(cli)};`,
+    `  if (spec) {`,
+    `    try {`,
+    `      const log = cproc.execSync(spec.install, { encoding: 'utf8', timeout: 240000, stdio: ['ignore','pipe','pipe'], shell: '/bin/bash' });`,
+    `      const path = cproc.execSync('command -v ' + spec.bin + ' 2>/dev/null || echo ""', { encoding: 'utf8', shell: '/bin/bash' }).trim();`,
+    `      let version = '';`,
+    `      if (path) { try { version = cproc.execSync((spec.versionCmd || (spec.bin + ' --version')) + ' 2>&1 | head -1', { encoding: 'utf8', timeout: 20000, shell: '/bin/bash' }).trim(); } catch (e) {} }`,
+    `      cli = { installed: !!path, bin: spec.bin, path: path || undefined, version: version || undefined, log: String(log).slice(-240) };`,
+    `    } catch (e) {`,
+    `      cli = { installed: false, bin: spec.bin, error: String((e && (e.stderr || e.message)) || e).slice(-400) };`,
+    `    }`,
+    `  }`,
+    `  console.log(JSON.stringify({ ok: true, host: os.hostname(), dir, manifest: ${JSON.stringify(manifest)}, cli }));`,
     `})();`,
   ].join('\n')
 }
@@ -455,7 +541,9 @@ export async function installCommunityAgentInSandbox(sandboxId: string, agent: R
     }
   }
   const startedAt = new Date().toISOString()
-  const out = await runInRuntimeSandbox(sandboxId, installCode(definition), { timeoutMs: 90_000 })
+  // Generous timeout: writing the adapter is instant, but installing the native
+  // CLI (npm global / curl|bash) can take a minute or more.
+  const out = await runInRuntimeSandbox(sandboxId, installCode(definition), { timeoutMs: 270_000 })
   if (!out.ok) {
     return {
       ...normalized,
@@ -468,6 +556,17 @@ export async function installCommunityAgentInSandbox(sandboxId: string, agent: R
       },
     }
   }
+  // Parse the install result line for the native-CLI outcome.
+  let cli: { installed?: boolean; bin?: string; version?: string; path?: string; error?: string; log?: string } | undefined
+  try {
+    const last = out.stdout.trim().split('\n').filter(Boolean).pop() ?? ''
+    cli = (JSON.parse(last) as { cli?: typeof cli }).cli ?? undefined
+  } catch {}
+  const cliLog = cli
+    ? cli.installed
+      ? `native CLI ${cli.bin} installed${cli.version ? ` (${cli.version})` : ''}`
+      : `native CLI ${cli.bin} NOT installed${cli.error ? `: ${cli.error}` : ''}`
+    : undefined
   return {
     ...normalized,
     modelConfig: normalized.modelConfig ?? definition.defaultModelConfig,
@@ -478,7 +577,8 @@ export async function installCommunityAgentInSandbox(sandboxId: string, agent: R
       version: definition.version,
       installedAt: new Date().toISOString(),
       error: null,
-      logs: [`${startedAt} installed ${definition.name} into runtime sandbox`, out.stdout.trim()].filter(Boolean).slice(-8),
+      ...(cli ? { nativeCli: { installed: !!cli.installed, bin: cli.bin ?? definition.nativeCli?.bin ?? '', version: cli.version, path: cli.path, error: cli.error } } : {}),
+      logs: [`${startedAt} installed ${definition.name} into runtime sandbox`, cliLog].filter(Boolean).slice(-8) as string[],
     },
   }
 }
@@ -513,11 +613,18 @@ async function applyCronRequests(ctx: CommunityPlatformContext, requests: CronRe
   return out
 }
 
+/** Live stream callback: 'delta' = a chunk of the final reply as it generates;
+ *  'post' = a standalone post_message the agent sent mid-turn. */
+export type CommunityStreamEvent = { kind: 'delta' | 'post'; text: string }
+
+const STREAM_EVENT_PREFIX = '__CIRRUS_EVENT__'
+
 export async function invokeInstalledCommunityAgent(
   sandboxId: string,
   agent: RuntimeAgentRef,
   history: ChatTurn[],
   platform?: CommunityPlatformContext,
+  onEvent?: (ev: CommunityStreamEvent) => void,
 ): Promise<{ ok: boolean; message: string; activities: DeveloperChatActivity[]; ui?: RuntimeMessageUi; posts?: string[] }> {
   const definition = communityAgentDefinition(agent.key)
   const activities: DeveloperChatActivity[] = []
@@ -542,12 +649,28 @@ export async function invokeInstalledCommunityAgent(
   activities.push({ kind: 'status', text: `Invoking installed ${definition.name} adapter in E2B sandbox` })
   const cronJobs = platform ? await listCronJobs(platform.runtimeId) : []
   const code = invokeCode(definition, history, platform ? { ...platform, cronJobs } : undefined)
-  const out = await runInRuntimeSandbox(sandboxId, code, { timeoutMs: 90_000 })
+  // Forward live stream events ('__CIRRUS_EVENT__<json>' lines) to onEvent as they
+  // arrive. Non-event lines (the final result object, host/dir logs) pass through.
+  // E2B delivers one OutputMessage per console.log line (no trailing newline);
+  // split defensively in case a chunk ever carries several lines.
+  const onStdout = onEvent
+    ? (raw: string) => {
+        for (const line of String(raw).split('\n')) {
+          if (!line.startsWith(STREAM_EVENT_PREFIX)) continue
+          try {
+            const ev = JSON.parse(line.slice(STREAM_EVENT_PREFIX.length)) as { k?: string; t?: string }
+            if ((ev.k === 'delta' || ev.k === 'post') && typeof ev.t === 'string') onEvent({ kind: ev.k, text: ev.t })
+          } catch {}
+        }
+      }
+    : undefined
+  const out = await runInRuntimeSandbox(sandboxId, code, { timeoutMs: 90_000, onStdout })
   if (!out.ok) {
     const error = out.error ?? (out.stderr || 'Community agent invocation failed.')
     return { ok: false, message: `${definition.name} failed: ${error}`, activities: [...activities, { kind: 'error', text: error, ok: false }] }
   }
-  const line = out.stdout.trim().split('\n').filter(Boolean).pop() ?? ''
+  // The result object is the last NON-event stdout line (events are streamed above).
+  const line = out.stdout.trim().split('\n').filter((l) => l && !l.startsWith(STREAM_EVENT_PREFIX)).pop() ?? ''
   try {
     const parsed = JSON.parse(line) as { ok: boolean; reply?: string; error?: string; host?: string; dir?: string; ui?: RuntimeMessageUi; cronRequests?: CronRequest[]; posts?: string[] }
     if (parsed.host) activities.push({ kind: 'status', text: `Sandbox host: ${parsed.host}` })
