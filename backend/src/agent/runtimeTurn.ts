@@ -3,7 +3,7 @@ import type { DeveloperChatMessage, MiniappRecord, RuntimeAgentRef, RuntimeRecor
 import type { RuntimeMessageUi } from './skillTools.ts'
 import { loadRecord } from '../store.ts'
 import { saveRuntime } from '../runtimeStore.ts'
-import { installCommunityAgentInSandbox, normalizeRuntimeAgentRef } from '../communityAgents.ts'
+import { communityAgentDefinition, installCommunityAgentInSandbox, normalizeRuntimeAgentRef } from '../communityAgents.ts'
 import {
   decideCirrusRuntimeRouting,
   describeCirrusRuntimeAgentSpecsForRuntime,
@@ -28,7 +28,11 @@ export async function installRuntimeCommunityAgents(runtime: RuntimeRecord): Pro
       agents.push(agent)
       continue
     }
-    if (agent.installation?.status === 'ready') {
+    // Reinstall when the registry adapter version has moved past what's installed,
+    // so capability changes (e.g. shell tools) reach already-provisioned runtimes.
+    const registryVersion = communityAgentDefinition(agent.key)?.version
+    const upToDate = !registryVersion || agent.installation?.version === registryVersion
+    if (agent.installation?.status === 'ready' && upToDate) {
       agents.push(agent)
       continue
     }

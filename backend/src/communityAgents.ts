@@ -29,6 +29,8 @@ export interface CommunityAgentDefinition {
   name: string
   description: string
   category: 'framework' | 'browser' | 'core' | 'coding'
+  /** Whether the agent gets sandbox filesystem + shell tools (run_command, etc.). */
+  shell: boolean
   adapter: 'platform-llm-adapter'
   version: string
   defaultModelConfig: RuntimeAgentModelConfig
@@ -56,8 +58,9 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     name: 'Hermes',
     description: 'Multi-agent orchestration framework for complex, long-running workflows.',
     category: 'framework',
+    shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.1.0',
+    version: '0.2.0',
     defaultModelConfig: platformModel(),
     capabilities: ['multi-agent coordination', 'workflow planning', 'handoff routing', 'status synthesis'],
     systemPrompt:
@@ -68,9 +71,10 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     key: 'community:OpenClaw',
     name: 'OpenClaw',
     description: 'Open web-browsing automation agent that drives real sites.',
-    category: 'browser',
+    category: 'framework',
+    shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.1.0',
+    version: '0.2.0',
     defaultModelConfig: platformModel(),
     capabilities: ['browser task planning', 'website automation planning', 'DOM/action reasoning'],
     systemPrompt:
@@ -82,8 +86,9 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     name: 'Pi Agent',
     description: 'Lightweight, framework-agnostic tool-calling agent core.',
     category: 'core',
+    shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.1.0',
+    version: '0.2.0',
     defaultModelConfig: platformModel(),
     capabilities: ['tool calling patterns', 'agent loop design', 'structured reasoning'],
     systemPrompt:
@@ -95,8 +100,9 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     name: 'Claude Code',
     description: "Anthropic's agentic coding assistant for the terminal and IDE.",
     category: 'coding',
+    shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.1.0',
+    version: '0.2.0',
     defaultModelConfig: subscriptionSkeleton('claude_code'),
     capabilities: ['codebase reasoning', 'patch planning', 'terminal workflow guidance'],
     systemPrompt:
@@ -108,8 +114,9 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     name: 'Codex',
     description: "OpenAI's autonomous software-engineering agent.",
     category: 'coding',
+    shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.1.0',
+    version: '0.2.0',
     defaultModelConfig: subscriptionSkeleton('codex'),
     capabilities: ['software engineering', 'repo inspection', 'implementation planning', 'test strategy'],
     systemPrompt:
@@ -121,8 +128,9 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     name: 'OpenCode',
     description: 'Open-source AI coding agent you can run anywhere.',
     category: 'coding',
+    shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.1.0',
+    version: '0.2.0',
     defaultModelConfig: subscriptionSkeleton('opencode'),
     capabilities: ['coding workflows', 'CLI-oriented engineering guidance', 'open-source agent operations'],
     systemPrompt:
@@ -163,7 +171,7 @@ function invokeSourceFor(definition: CommunityAgentDefinition): string {
   return `
 export async function invoke(payload) {
   const { model, agent, history } = payload;
-  const coding = agent.category === 'coding';
+  const shell = agent.shell === true;
   const baseSystem = [
     agent.systemPrompt,
     'You are running inside a Cirrus runtime and can act on the platform through these tools:',
@@ -172,12 +180,12 @@ export async function invoke(payload) {
     '- list_cron_jobs(): list this runtime\\'s scheduled tasks.',
     '- create_cron_job(name, schedule, message, targetAgentKey?): schedule a recurring message to a runtime agent. schedule is a 5-field cron expression (e.g. "0 9 * * 1-5" = weekdays 09:00, server timezone).',
     '- update_cron_job(id, ...fields), delete_cron_job(id): edit/remove a scheduled task.',
-    coding ? [
-      'You are also a coding agent running inside this runtime sandbox.',
-      'The runtime filesystem is isolated to this E2B sandbox. Use /home/user/cirrus/workspace as the default workspace for repositories.',
-      'You have full coding tools for files and shell commands under /home/user/cirrus.',
-      'Use read_file/write_file/list_dir/run_command to inspect, edit, run tests, use git, push branches, and verify work.',
-      'Do not only describe commands when the user asked you to make a change; execute the work inside the sandbox.',
+    shell ? [
+      'You also run inside this runtime\\'s isolated E2B sandbox with full filesystem and shell access.',
+      'Use /home/user/cirrus/workspace as the default workspace for repositories.',
+      'You have file and shell tools under /home/user/cirrus.',
+      'Use read_file/write_file/list_dir/run_command to inspect, edit, run commands, use git, push branches, and verify work.',
+      'When the user asks you to make a change, execute it in the sandbox rather than only describing the commands.',
     ].join('\\n') : '',
   ].filter(Boolean).join('\\n');
   const messages = [
@@ -187,10 +195,10 @@ export async function invoke(payload) {
   // Accumulates out-of-band UI (ask_user buttons, send_image) and deferred cron
   // mutations; the host applies/propagates these after invoke() returns.
   const acc = { ui: {}, cronRequests: [] };
-  const tools = [...platformTools(), ...(coding ? codingTools() : [])];
+  const tools = [...platformTools(), ...(shell ? codingTools() : [])];
   const done = (msg) => ({ ok: true, reply: msg, ui: acc.ui, cronRequests: acc.cronRequests });
 
-  for (let i = 0; i < (coding ? 14 : 6); i += 1) {
+  for (let i = 0; i < (shell ? 14 : 6); i += 1) {
     const res = await fetch(model.endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: 'Bearer ' + model.apiKey },
@@ -199,7 +207,7 @@ export async function invoke(payload) {
         messages,
         tools,
         tool_choice: 'auto',
-        max_completion_tokens: coding ? 1800 : 1000,
+        max_completion_tokens: shell ? 1800 : 1000,
       })
     });
     const data = await res.json();
@@ -390,6 +398,7 @@ function invokeCode(
       key: definition.key,
       name: definition.name,
       category: definition.category,
+      shell: definition.shell,
       systemPrompt: [
         definition.systemPrompt,
         '',

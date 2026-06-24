@@ -2709,7 +2709,7 @@ const COMMUNITY: CommunityAgent[] = [
   {
     name: 'OpenClaw',
     desc: 'Open web-browsing automation agent that drives real sites.',
-    tag: 'Browser',
+    tag: 'Framework',
     logoSrc: '/community-agents/openclaw.svg',
     logoAlt: 'OpenClaw logo',
     color: '#EF4444',
