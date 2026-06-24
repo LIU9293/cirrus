@@ -112,6 +112,15 @@ export function App() {
     setSelectionAttachment(null)
   }, [])
 
+  const clearActiveMiniapp = useCallback(() => {
+    messagesHydratedForRef.current = null
+    setMiniapp(null)
+    setMessages([])
+    setLiveMessages([])
+    setSelectingElement(false)
+    setSelectionAttachment(null)
+  }, [])
+
   const refreshList = useCallback(async () => {
     try {
       setList(await listMiniapps())
@@ -129,15 +138,16 @@ export function App() {
   useEffect(() => {
     if (!auth?.user) return
     void (async () => {
-      await refreshList()
       const existing = await listMiniapps().catch(() => [])
+      setList(existing)
       if (existing.length > 0) {
         setActiveMiniapp(await getMiniapp(existing[0].id))
       } else {
-        setActiveMiniapp(await createMiniapp())
+        clearActiveMiniapp()
+        if (window.location.pathname === ROUTES.flow) navigate('agents', true)
       }
     })()
-  }, [auth?.user, refreshList, setActiveMiniapp])
+  }, [auth?.user, clearActiveMiniapp, navigate, setActiveMiniapp])
 
   useEffect(() => {
     if (!miniapp || messagesHydratedForRef.current !== miniapp.id) return
@@ -193,12 +203,15 @@ export function App() {
       setList(nextList)
 
       if (miniapp?.id === id) {
-        const next = nextList[0] ? await getMiniapp(nextList[0].id) : await createMiniapp()
-        setActiveMiniapp(next)
-        if (nextList.length === 0) void refreshList()
+        if (nextList[0]) {
+          setActiveMiniapp(await getMiniapp(nextList[0].id))
+        } else {
+          clearActiveMiniapp()
+          navigate('agents', true)
+        }
       }
     },
-    [miniapp?.id, refreshList, setActiveMiniapp],
+    [clearActiveMiniapp, miniapp?.id, navigate, setActiveMiniapp],
   )
 
   const handleState = useCallback((state: Record<string, unknown>, version: number) => {
@@ -565,6 +578,33 @@ function LoginScreen({ devAuth, onDevLogin }: { devAuth: boolean; onDevLogin: (u
   )
 }
 
+// Playful little corner illustrations for the nav cards. Decorative only —
+// they inherit each card's text color via currentColor and drift gently.
+function AgentNavIllo() {
+  return (
+    <svg className="cirrus-float" width="46" height="46" viewBox="0 0 46 46" fill="none" style={{ opacity: 0.85 }}>
+      <circle cx="23" cy="6" r="2.6" fill="currentColor" />
+      <line x1="23" y1="8.6" x2="23" y2="14" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+      <rect x="9" y="14" width="28" height="22" rx="8" fill="currentColor" opacity="0.16" stroke="currentColor" strokeWidth="2.4" />
+      <circle cx="18" cy="25" r="2.6" fill="currentColor" />
+      <circle cx="28" cy="25" r="2.6" fill="currentColor" />
+      <path d="M19 31c1.4 1.2 6.6 1.2 8 0" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+      <line x1="6" y1="22" x2="6" y2="28" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+      <line x1="40" y1="22" x2="40" y2="28" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function RuntimeNavIllo() {
+  return (
+    <svg className="cirrus-float-rev" width="46" height="46" viewBox="0 0 46 46" fill="none" style={{ opacity: 0.85 }}>
+      <path d="M23 5c6 3 9 9 9 16 0 3-.8 5.6-2 7.8l-7 4-7-4C14.8 26.6 14 24 14 21c0-7 3-13 9-16Z" fill="currentColor" opacity="0.16" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" />
+      <circle cx="23" cy="19" r="3.4" fill="currentColor" />
+      <path d="M16 33c-2 1.6-2.4 5-2 7 2-.6 5-1.4 6.4-3.4M30 33c2 1.6 2.4 5 2 7-2-.6-5-1.4-6.4-3.4" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 function AppNavbar({
   user,
   view,
@@ -582,6 +622,7 @@ function AppNavbar({
         label: 'Agent',
         bgColor: '#f3f0ff',
         textColor: '#29215d',
+        icon: <AgentNavIllo />,
         links: [
           { label: 'My Agents', ariaLabel: 'Open My Agents', active: view === 'agents', onClick: () => onNavigate('agents') },
           { label: 'Community', ariaLabel: 'Open Community Agents', active: view === 'community', onClick: () => onNavigate('community') },
@@ -591,6 +632,7 @@ function AppNavbar({
         label: 'Runtime',
         bgColor: '#edfdf7',
         textColor: '#123b2f',
+        icon: <RuntimeNavIllo />,
         links: [
           { label: 'My Runtimes', ariaLabel: 'Open My Runtimes', active: view === 'runtime', onClick: () => onNavigate('runtime') },
         ],

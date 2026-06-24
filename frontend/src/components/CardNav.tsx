@@ -15,6 +15,8 @@ export type CardNavItem = {
   bgColor: string
   textColor: string
   links: CardNavLink[]
+  /** Decorative illustration shown in the card's top-right corner. */
+  icon?: ReactNode
 }
 
 export interface CardNavProps {
@@ -241,9 +243,14 @@ export function CardNav({
             <div
               key={`${item.label}-${idx}`}
               ref={setCardRef(idx)}
-              className="nav-card relative flex h-auto min-h-[64px] min-w-0 flex-[1_1_auto] select-none flex-col gap-2 rounded-[10px] p-3 md:h-full md:min-h-0 md:flex-[1_1_0%] md:p-4"
+              className="nav-card relative flex h-auto min-h-[64px] min-w-0 flex-[1_1_auto] select-none flex-col gap-2 overflow-hidden rounded-[10px] p-3 md:h-full md:min-h-0 md:flex-[1_1_0%] md:p-4"
               style={{ backgroundColor: item.bgColor, color: item.textColor }}
             >
+              {item.icon && (
+                <div className="pointer-events-none absolute right-3 top-3 md:right-4 md:top-4" aria-hidden="true">
+                  {item.icon}
+                </div>
+              )}
               <div className="text-[18px] font-semibold tracking-normal md:text-[20px]">{item.label}</div>
               <div className="mt-auto flex flex-col gap-1">
                 {item.links.map((link) => (

@@ -68,13 +68,23 @@ export async function createMiniapp(ownerId: string): Promise<MiniappRecord> {
     defineMessages: [],
     updatedAt: new Date().toISOString(),
   }
-  await saveRecord(record)
+  await saveRecord(record, { createIfMissing: true })
   return record
 }
 
-export async function saveRecord(record: MiniappRecord): Promise<void> {
+export async function saveRecord(record: MiniappRecord, options: { createIfMissing?: boolean } = {}): Promise<void> {
   record.updatedAt = new Date().toISOString()
   const { html, ...rest } = record
+  if (!options.createIfMissing) {
+    await query(
+      `update miniapps
+       set owner_id = $2, data = $3, html = $4, state_version = $5, updated_at = now()
+       where id = $1`,
+      [record.id, record.ownerId, JSON.stringify(rest), html ?? null, record.stateVersion ?? 0],
+    )
+    return
+  }
+
   await query(
     `insert into miniapps (id, owner_id, data, html, state_version, updated_at)
      values ($1, $2, $3, $4, $5, now())

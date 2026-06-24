@@ -103,6 +103,15 @@ import {
 import { MiniappCanvas, type MiniappCanvasHandle } from '@/canvas/MiniappCanvas'
 import { MessageResponse } from '@/components/ai-elements/message'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import type { UiMessage } from '@/chat/ChatPanel'
 import { cn } from '@/lib/utils'
 
@@ -1697,6 +1706,7 @@ function SkillPanel({
   const stagger = index * 26 // cascade multiple open panels
   const rootRef = useRef<HTMLDivElement>(null)
   const [max, setMax] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   // Drag the whole header (windowed mode only; ignores clicks on buttons).
   const [d, setD] = useState({ x: 0, y: 0 })
@@ -1855,6 +1865,14 @@ function SkillPanel({
       .join('\n')
 
   const ready = !!skill && skill.status === 'active'
+  const deleteSkill = () => {
+    if (!skill) return
+    onUpdateFlow({
+      skills: (miniapp.skills ?? []).filter((s) => s.id !== skill.id),
+    })
+    setDeleteOpen(false)
+    onClose()
+  }
 
   return (
     <div
@@ -2136,6 +2154,18 @@ function SkillPanel({
                   </>
                 )}
                 {skill?.platformSkillId === 'database' && <DatabaseSkillDiagnostics appId={appId} />}
+                {skill && (
+                  <div className="mt-auto pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setDeleteOpen(true)}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-semibold text-red-700 transition-colors hover:bg-red-100"
+                    >
+                      <Trash2 className="size-3.5" />
+                      Delete skill
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -2209,6 +2239,37 @@ function SkillPanel({
             </div>
           </div>
           </div>
+        )}
+
+        {skill && (
+          <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+            <DialogContent className="max-w-[380px] rounded-[16px] border border-border bg-surface p-5 shadow-[0_24px_64px_-20px_rgba(25,25,23,0.45)]">
+              <DialogHeader>
+                <DialogTitle className="text-[16px] text-ink">Delete skill?</DialogTitle>
+                <DialogDescription className="text-[13px] leading-relaxed text-ink-secondary">
+                  This removes "{skill.name}" from this agent. This cannot be undone from the editor history.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="gap-2 sm:justify-end">
+                <DialogClose asChild>
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center rounded-[9px] border border-border bg-surface px-3 py-2 text-[12px] font-semibold text-ink-secondary transition-colors hover:bg-surface-muted"
+                  >
+                    Cancel
+                  </button>
+                </DialogClose>
+                <button
+                  type="button"
+                  onClick={deleteSkill}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-[9px] bg-red-600 px-3 py-2 text-[12px] font-semibold text-white transition-colors hover:bg-red-700"
+                >
+                  <Trash2 className="size-3.5" />
+                  Delete
+                </button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         )}
 
         {/* Corner resize handle */}
@@ -2368,19 +2429,56 @@ export function MyAgentsPage({
             <Plus className="size-[15px]" /> New agent
           </button>
         </div>
-        <div className={PAGE_GRID_CLASS}>
-          {agents.map((a) => (
-            <AgentCard key={a.id} agent={a} onClick={() => onOpen(a.id)} onRemove={() => onRemove(a.id)} />
-          ))}
-          <button
-            onClick={onNew}
-            className="flex min-h-[152px] flex-col items-center justify-center gap-2 rounded-[16px] border border-dashed border-border-strong bg-white text-ink-tertiary hover:bg-surface-muted"
-          >
-            <Plus className="size-6" />
-            <span className="text-[13px] font-medium">Create a new agent</span>
-          </button>
-        </div>
+        {agents.length === 0 ? (
+          <EmptyAgents onNew={onNew} onBrowseCommunity={() => onNavigate('community')} />
+        ) : (
+          <div className={PAGE_GRID_CLASS}>
+            {agents.map((a) => (
+              <AgentCard key={a.id} agent={a} onClick={() => onOpen(a.id)} onRemove={() => onRemove(a.id)} />
+            ))}
+            <button
+              onClick={onNew}
+              className="flex min-h-[152px] flex-col items-center justify-center gap-2 rounded-[16px] border border-dashed border-border-strong bg-white text-ink-tertiary hover:bg-surface-muted"
+            >
+              <Plus className="size-6" />
+              <span className="text-[13px] font-medium">Create a new agent</span>
+            </button>
+          </div>
+        )}
       </div>
+    </div>
+  )
+}
+
+function EmptyAgents({ onNew, onBrowseCommunity }: { onNew: () => void; onBrowseCommunity: () => void }) {
+  return (
+    <div className="mt-7 flex flex-col items-center justify-center gap-5 rounded-[20px] border border-dashed border-border-strong bg-white/40 px-4 py-14 text-center sm:py-20">
+      <div className="relative">
+        <div className="cirrus-float flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-[#837DFF] text-primary-foreground shadow-[0_14px_34px_-10px_rgba(91,87,242,0.55)]">
+          <Sparkles className="size-7" />
+        </div>
+        <div className="cirrus-float-rev absolute -right-5 -top-3 size-3 rounded-full bg-primary/25" />
+        <div className="cirrus-float-slow absolute -left-6 bottom-0 size-2.5 rounded-full bg-primary/20" />
+      </div>
+      <div>
+        <div className="text-[17px] font-bold tracking-tight text-ink">No agents yet — a blank canvas awaits</div>
+        <p className="mx-auto mt-1.5 max-w-sm text-[13px] leading-relaxed text-ink-secondary">
+          An agent can chat, run skills, and even show its own little app. Describe what you want and watch it come to life.
+        </p>
+      </div>
+      <button
+        onClick={onNew}
+        className="inline-flex items-center gap-1.5 rounded-[11px] bg-primary px-4 py-2.5 text-[13.5px] font-semibold text-primary-foreground hover:opacity-90"
+      >
+        <Plus className="size-[15px]" /> Create your first agent
+      </button>
+      <button
+        onClick={onBrowseCommunity}
+        className="group inline-flex items-center gap-1.5 text-[12.5px] font-medium text-ink-secondary hover:text-ink"
+      >
+        <Globe className="size-[14px]" /> Or browse community agents
+        <ArrowRight className="size-[13px] transition-transform group-hover:translate-x-0.5" />
+      </button>
     </div>
   )
 }
@@ -2695,7 +2793,7 @@ export function CommunityPage({ onNavigate }: { onNavigate: (v: NavView) => void
                 it.kind === 'hardcoded' ? (
                   <CommunityAgentCard key={'h-' + it.agent.name} agent={it.agent} usedIn={usage[`community:${it.agent.name}`] ?? 0} onNavigate={onNavigate} />
                 ) : (
-                  <PublishedAgentCard key={'p-' + it.agent.id} agent={it.agent} />
+                  <PublishedAgentCard key={'p-' + it.agent.id} agent={it.agent} onNavigate={onNavigate} />
                 ),
               )}
             </div>
@@ -2706,19 +2804,75 @@ export function CommunityPage({ onNavigate }: { onNavigate: (v: NavView) => void
   )
 }
 
-function PublishedAgentCard({ agent }: { agent: PublishedAgent }) {
+function PublishedAgentCard({ agent, onNavigate }: { agent: PublishedAgent; onNavigate: (v: NavView) => void }) {
+  const [addOpen, setAddOpen] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const agentRef: RuntimeAgentRef = { key: `own:${agent.id}`, name: agent.name, source: 'own', miniappId: agent.id }
+
   return (
-    <div className="flex min-h-[152px] cursor-default flex-col gap-3 rounded-[16px] border border-border bg-white p-5 text-left shadow-[0_8px_24px_-12px_rgba(25,25,23,0.10)]">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => setExpanded((v) => !v)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded((v) => !v) } }}
+      aria-expanded={expanded}
+      className="flex min-h-[152px] cursor-pointer flex-col gap-3 rounded-[16px] border border-border bg-white p-5 text-left shadow-[0_8px_24px_-12px_rgba(25,25,23,0.10)] transition-shadow hover:shadow-[0_12px_30px_-12px_rgba(25,25,23,0.18)]"
+    >
       <div className="flex items-center gap-2.5">
         <div className="flex size-[34px] shrink-0 items-center justify-center rounded-[9px] bg-accent-soft text-accent-ink">
           <Sparkles className="size-[18px]" />
         </div>
         <div className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{agent.name}</div>
+        <ChevronDown className={cn('size-4 shrink-0 text-ink-tertiary transition-transform duration-200', expanded && 'rotate-180')} />
       </div>
-      <div className="line-clamp-3 flex-1 text-[12.5px] leading-relaxed text-ink-secondary">{agent.description || 'A community-published agent.'}</div>
+      <div className={cn('flex-1 text-[12.5px] leading-relaxed text-ink-secondary', !expanded && 'line-clamp-2')}>
+        {agent.description || 'A community-published agent.'}
+      </div>
       <div className="flex items-center gap-2">
         <span className="rounded-full bg-surface-muted px-2.5 py-1 text-[11px] font-semibold text-ink-secondary">Community</span>
       </div>
+
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            key="more"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ height: { type: 'spring', bounce: 0.3, duration: 0.5 }, opacity: { duration: 0.15 } }}
+            style={{ overflow: 'hidden' }}
+          >
+            <motion.div
+              className="mt-1 flex flex-col gap-3 border-t border-border pt-3"
+              variants={{ show: { transition: { staggerChildren: 0.06, delayChildren: 0.08 } }, hidden: {} }}
+              initial="hidden"
+              animate="show"
+            >
+              <motion.div variants={EXPAND_ITEM} className="flex items-center gap-2 text-[12px] text-ink-secondary">
+                <span className="grid size-5 place-items-center rounded-full bg-accent-soft text-[9px] font-bold text-accent-ink">C</span>
+                Published by <span className="font-semibold text-ink">Cirrus user</span>
+              </motion.div>
+              <motion.div variants={EXPAND_ITEM} className="flex items-center gap-2 text-[12px] text-ink-secondary">
+                <Server className="size-4 text-ink-tertiary" />
+                Runs as a shared Mini App agent
+              </motion.div>
+              <motion.button
+                variants={EXPAND_ITEM}
+                onClick={(e) => { e.stopPropagation(); setAddOpen(true) }}
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-[11px] bg-primary px-4 py-2.5 text-[13px] font-semibold text-primary-foreground hover:opacity-90"
+              >
+                Use this agent <ArrowRight className="size-[15px]" />
+              </motion.button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {addOpen &&
+        createPortal(
+          <AddToRuntimeDialog agentRef={agentRef} agentName={agent.name} onClose={() => setAddOpen(false)} onNavigateRuntime={() => onNavigate('runtime')} />,
+          document.body,
+        )}
     </div>
   )
 }
