@@ -36,9 +36,10 @@ export interface CommunityAgentDefinition {
    *  later step will drive it instead of the platform-model adapter. `risky` marks
    *  install scripts from less-certain sources (curl|bash) worth reviewing. */
   nativeCli?: { install: string; bin: string; versionCmd?: string; risky?: boolean }
-  /** When true, the in-sandbox adapter DRIVES the native CLI (e.g. `opencode run`)
-   *  instead of running the platform-model tool loop. */
+  /** When true, the in-sandbox adapter DRIVES the native CLI instead of running the
+   *  platform-model tool loop. `cliDriver` picks which CLI driver to generate. */
   driveNativeCli?: boolean
+  cliDriver?: 'opencode' | 'openclaw'
   adapter: 'platform-llm-adapter'
   version: string
   defaultModelConfig: RuntimeAgentModelConfig
@@ -83,9 +84,11 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'framework',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.6.0',
+    version: '0.7.0',
     defaultModelConfig: platformModel(),
     nativeCli: { install: 'npm install -g openclaw --force', bin: 'openclaw', risky: true },
+    driveNativeCli: true,
+    cliDriver: 'openclaw',
     capabilities: ['browser task planning', 'website automation planning', 'DOM/action reasoning'],
     systemPrompt:
       'You are OpenClaw, a web automation agent. Help plan browser actions and explain safe website automation steps. Do not claim to click external sites unless a browser tool is explicitly connected.',
@@ -147,6 +150,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     defaultModelConfig: subscriptionSkeleton('opencode'),
     nativeCli: { install: 'npm i -g opencode-ai', bin: 'opencode' },
     driveNativeCli: true,
+    cliDriver: 'opencode',
     capabilities: ['coding workflows', 'CLI-oriented engineering guidance', 'open-source agent operations'],
     systemPrompt:
       'You are OpenCode in a Cirrus runtime adapter. Help with coding tasks and CLI-oriented development. Mention when native OpenCode auth/install is not connected.',
@@ -289,8 +293,55 @@ export async function invoke(payload) {
 `
 }
 
+// Adapter that DRIVES the native `openclaw` CLI. OpenClaw has no free model, so we
+// point its embedded agent at the platform OpenAI-compatible endpoint via env
+// (OPENAI_BASE_URL/OPENAI_API_KEY) and parse its --json result (finalAssistantVisibleText).
+// TODO(next): bridge platform tools via `openclaw mcp` (it supports MCP servers).
+function openclawDriverSource(): string {
+  return `
+export async function invoke(payload) {
+  const { history, model } = payload;
+  const cp = await import('node:child_process');
+  const base = String((model && model.endpoint) || '').replace(/\\/chat\\/completions\\/?$/, '');
+  const key = (model && model.apiKey) || '';
+  const modelId = (model && model.id) || 'gpt-5.5';
+  const turns = Array.isArray(history) ? history : [];
+  const lastUser = [...turns].reverse().find((t) => t.role === 'user') || { content: '' };
+  const prior = turns.slice(0, Math.max(0, turns.length - 1)).map((t) => (t.role === 'user' ? 'User' : 'Assistant') + ': ' + t.content).join('\\n');
+  const message = (prior ? '<conversation_so_far>\\n' + prior + '\\n</conversation_so_far>\\n\\n' : '') + (lastUser.content || '');
+  const emit = (k, t) => { try { console.log('__CIRRUS_EVENT__' + JSON.stringify({ k: k, t: t })); } catch (e) {} };
+  const sessionKey = 'cirrus-' + Date.now();
+  return await new Promise((resolve) => {
+    let settled = false;
+    const done = (r) => { if (!settled) { settled = true; resolve(r); } };
+    let child;
+    try {
+      child = cp.spawn('openclaw', ['agent', '--local', '--session-key', sessionKey, '-m', message, '--model', modelId, '--json'], { cwd: '/home/user', env: { ...process.env, OPENAI_API_KEY: key, OPENAI_BASE_URL: base }, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) { return done({ ok: false, error: 'openclaw spawn failed: ' + (e && e.message) }); }
+    let outbuf = '';
+    let errbuf = '';
+    child.stdout.on('data', (d) => { outbuf += d.toString(); });
+    child.stderr.on('data', (d) => { errbuf += d.toString(); });
+    child.on('error', (e) => done({ ok: false, error: 'openclaw error: ' + (e && e.message) }));
+    child.on('close', (code) => {
+      let reply = '';
+      try {
+        const s = outbuf.indexOf('{'); const e = outbuf.lastIndexOf('}');
+        if (s >= 0 && e > s) { const j = JSON.parse(outbuf.slice(s, e + 1)); reply = (j.meta && j.meta.finalAssistantVisibleText) || (j.payloads && j.payloads[0] && j.payloads[0].text) || ''; }
+      } catch (e) {}
+      if (!reply) return done({ ok: false, error: 'openclaw produced no reply (exit ' + code + '): ' + errbuf.slice(-400) });
+      emit('delta', reply);
+      done({ ok: true, reply: reply, ui: {}, cronRequests: [], posts: [] });
+    });
+  });
+}
+`
+}
+
 function invokeSourceFor(definition: CommunityAgentDefinition): string {
-  if (definition.driveNativeCli) return opencodeDriverSource(CIRRUS_MCP_SERVER)
+  if (definition.driveNativeCli) {
+    return definition.cliDriver === 'openclaw' ? openclawDriverSource() : opencodeDriverSource(CIRRUS_MCP_SERVER)
+  }
   return `
 export async function invoke(payload) {
   const { model, agent, history } = payload;
