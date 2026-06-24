@@ -28,6 +28,11 @@ export const config = {
   baseURL: process.env.OPENAI_BASE_URL ?? 'https://ai-relay.chainbot.io/v1',
   apiKey: process.env.OPENAI_API_KEY ?? '',
   model: process.env.MINIAPP_MODEL ?? 'gpt-5.5',
+  /** Claude Code talks the Anthropic Messages format, so it uses a dedicated
+   *  Anthropic-relay base URL + token (separate from the OpenAI-compatible platform
+   *  key). Used only by the community Claude driver. */
+  claudeAnthropicBaseUrl: process.env.CLAUDE_ANTHROPIC_BASE_URL ?? '',
+  claudeAnthropicAuthToken: process.env.CLAUDE_ANTHROPIC_AUTH_TOKEN ?? '',
   /** Custom E2B template (built by scripts/buildRuntimeTemplate.ts) with all six
    *  community-agent CLIs baked in, so sandboxes start with them present. */
   runtimeSandboxTemplate: process.env.RUNTIME_SANDBOX_TEMPLATE ?? 'cirrus-runtime',
