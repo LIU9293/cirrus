@@ -1959,8 +1959,8 @@ function SkillPanel({
               <MousePointer2 className="size-4" />
             </button>
           )}
-          {/* Styling selector (mini app only), left of the Preview/Edit toggle */}
-          {isMiniApp && onBuild && (
+          {/* Styling selector (mini app, Edit mode only), left of the Preview/Edit toggle */}
+          {isMiniApp && onBuild && appMode === 'edit' && (
             <div className="relative mr-1 flex items-center gap-1.5">
               <span className="text-[11px] font-medium text-ink-tertiary">Styling</span>
               <button
@@ -2055,21 +2055,35 @@ function SkillPanel({
               className="w-1.5 shrink-0 cursor-col-resize bg-black/5 transition-colors hover:bg-primary/40"
             />
             <div className="flex min-h-0 shrink-0 flex-col" style={{ width: rightW }}>
-              <BuildChat
-                title=""
-                placeholder={miniapp.html ? 'Describe a surface change…' : 'Describe the mini app surface…'}
-                empty={
-                  miniapp.html
-                    ? 'Discuss or adjust how this mini app surface supports the agent purpose, skills, and user workflow.'
-                    : 'Describe the dashboard surface to build for this agent.'
-                }
-                messages={onBuild ? buildMessages ?? [] : scopedChatMessages}
-                building={onBuild ? !!building : chatBusy}
-                busyLabel="working..."
-                onSend={(text) => (onBuild ? onBuild(text, surfaceAgentContent(text)) : void sendScopedChat(text))}
-                attachmentLabel={onBuild && appMode === 'edit' ? selectedElement?.label : undefined}
-                onClearAttachment={onBuild && appMode === 'edit' ? onClearSelection : undefined}
-              />
+              {/* Edit and Preview keep SEPARATE conversation logs: Edit = build chat
+                  (modify the surface), Preview = live chat (use the app / talk to the agent). */}
+              {appMode === 'edit' ? (
+                <BuildChat
+                  title=""
+                  placeholder={miniapp.html ? 'Describe a surface change…' : 'Describe the mini app surface…'}
+                  empty={
+                    miniapp.html
+                      ? 'Discuss or adjust how this mini app surface supports the agent purpose, skills, and user workflow.'
+                      : 'Describe the dashboard surface to build for this agent.'
+                  }
+                  messages={onBuild ? buildMessages ?? [] : scopedChatMessages}
+                  building={onBuild ? !!building : chatBusy}
+                  busyLabel="working..."
+                  onSend={(text) => (onBuild ? onBuild(text, surfaceAgentContent(text)) : void sendScopedChat(text))}
+                  attachmentLabel={onBuild ? selectedElement?.label : undefined}
+                  onClearAttachment={onBuild ? onClearSelection : undefined}
+                />
+              ) : (
+                <BuildChat
+                  title=""
+                  placeholder="Message this mini app…"
+                  empty="Use the mini app — chat with its agent here. This conversation is separate from Edit."
+                  messages={onLiveSend ? liveMessages ?? [] : scopedChatMessages}
+                  building={onLiveSend ? !!liveStreaming : chatBusy}
+                  busyLabel="thinking..."
+                  onSend={(text) => (onLiveSend ? onLiveSend(text) : void sendScopedChat(text))}
+                />
+              )}
             </div>
           </div>
         ) : isRequirements ? (
