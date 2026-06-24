@@ -198,7 +198,7 @@ export function CardNav({
         <div className="card-nav-top absolute inset-x-0 top-0 z-[2] flex h-[60px] items-center justify-between px-2.5 py-2 sm:pl-4">
           <button
             type="button"
-            className="group order-2 flex h-full w-11 flex-col items-center justify-center gap-[6px] rounded-[12px] text-ink transition-colors hover:bg-surface-muted sm:order-none"
+            className="group flex h-full w-11 flex-col items-center justify-center gap-[6px] rounded-[12px] text-ink transition-colors hover:bg-surface-muted"
             onClick={toggleMenu}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
