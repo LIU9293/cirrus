@@ -60,7 +60,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'framework',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.2.0',
+    version: '0.3.0',
     defaultModelConfig: platformModel(),
     capabilities: ['multi-agent coordination', 'workflow planning', 'handoff routing', 'status synthesis'],
     systemPrompt:
@@ -74,7 +74,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'framework',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.2.0',
+    version: '0.3.0',
     defaultModelConfig: platformModel(),
     capabilities: ['browser task planning', 'website automation planning', 'DOM/action reasoning'],
     systemPrompt:
@@ -88,7 +88,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'core',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.2.0',
+    version: '0.3.0',
     defaultModelConfig: platformModel(),
     capabilities: ['tool calling patterns', 'agent loop design', 'structured reasoning'],
     systemPrompt:
@@ -102,7 +102,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'coding',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.2.0',
+    version: '0.3.0',
     defaultModelConfig: subscriptionSkeleton('claude_code'),
     capabilities: ['codebase reasoning', 'patch planning', 'terminal workflow guidance'],
     systemPrompt:
@@ -116,7 +116,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'coding',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.2.0',
+    version: '0.3.0',
     defaultModelConfig: subscriptionSkeleton('codex'),
     capabilities: ['software engineering', 'repo inspection', 'implementation planning', 'test strategy'],
     systemPrompt:
@@ -130,7 +130,7 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'coding',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.2.0',
+    version: '0.3.0',
     defaultModelConfig: subscriptionSkeleton('opencode'),
     capabilities: ['coding workflows', 'CLI-oriented engineering guidance', 'open-source agent operations'],
     systemPrompt:
@@ -185,6 +185,7 @@ export async function invoke(payload) {
       'Use /home/user/cirrus/workspace as the default workspace for repositories.',
       'You have file and shell tools under /home/user/cirrus.',
       'Use read_file/write_file/list_dir/run_command to inspect, edit, run commands, use git, push branches, and verify work.',
+      'You HAVE outbound internet access through the sandbox: use run_command with curl/wget to fetch URLs, call HTTP APIs, clone repos, and install packages (npm/pip). Do not claim you cannot go online — when you need web data, fetch it with run_command.',
       'When the user asks you to make a change, execute it in the sandbox rather than only describing the commands.',
     ].join('\\n') : '',
   ].filter(Boolean).join('\\n');
