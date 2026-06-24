@@ -276,10 +276,16 @@ export interface SkillPlan {
   items: SkillPlanItem[]
 }
 
+/** Visual style the creator picks for the generated miniapp surface. Drives which
+ *  section of the frontend-developer-skill the builder follows. */
+export type MiniappStyle = 'default' | 'modern' | 'custom'
+
 /** Captured during the Define step, before a manifest exists. */
 export interface MiniappDraft {
   name?: string
   goal?: string
+  /** Chosen visual style for the mini app build. Defaults to 'default'. */
+  style?: MiniappStyle
 }
 
 /** A signed-in user (Google-backed). Stored server-side. */

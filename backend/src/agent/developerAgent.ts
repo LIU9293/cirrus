@@ -14,7 +14,7 @@ import {
 } from '../store.ts'
 import { requestCanvasScreenshot } from '../canvasScreenshot.ts'
 import { findPlatformSkill } from '../skills/library.ts'
-import type { MiniappManifest, MiniappRecord } from '../../../shared/protocol.ts'
+import type { MiniappManifest, MiniappRecord, MiniappStyle } from '../../../shared/protocol.ts'
 import { developerSkillPrompt, developerSkillsCatalogPrompt } from './developerSkills.ts'
 
 export type AgentEvent =
@@ -39,17 +39,25 @@ export interface ChatTurn {
 type Emit = (event: AgentEvent) => void
 
 const SKILLS_DIR = resolve(config.repoRoot, 'backend', 'skills')
-const ALWAYS_APPLIED_SKILLS = [
-  {
-    name: 'hallmark-miniapp-design',
-    instruction: 'Apply this skill to the current miniapp build unless the user explicitly asks for a different design discipline.',
-  },
-  {
-    name: 'shadcn-ui',
-    instruction:
-      'Apply this skill as shadcn/ui-informed composition guidance. Respect the Cirrus miniapp runtime boundary: React + Tailwind + CirrusUI only.',
-  },
-]
+
+const STYLE_GUIDANCE: Record<MiniappStyle, string> = {
+  default: 'The creator chose the "Default" style — follow the Default (Terr look) section: shadcn-like primitives styled to Terr\'s warm, editorial Fantastic Planet system.',
+  modern: 'The creator chose the "Modern" style — follow the Modern section: expressive reactbits/Aceternity-inspired motion and polish, reproduced by hand in React + Tailwind (no imports).',
+  custom: 'The creator chose the "Custom" style — follow the Custom section: defer to the creator\'s prompt for look and feel; give only the most basic shadcn-like primitives.',
+}
+
+/** The single always-applied design skill. The instruction is built per build so
+ *  it names the creator's selected style and points the builder at the matching
+ *  section of the skill. */
+function appliedDesignSkill(style: MiniappStyle) {
+  return {
+    name: 'frontend-developer-skill',
+    instruction: [
+      'Apply this skill to the current miniapp build. Respect the runtime boundary: React + Tailwind + CirrusUI only — never import npm packages.',
+      STYLE_GUIDANCE[style],
+    ].join(' '),
+  }
+}
 
 const EMPTY_USAGE: Usage = {
   input: 0,
@@ -83,7 +91,8 @@ function makeModel(): Model<'openai-completions'> {
 }
 
 async function buildSystemPrompt(record: MiniappRecord, emit: Emit): Promise<string> {
-  const skillContext = await loadSkillContext(emit)
+  const style: MiniappStyle = record.draft?.style ?? 'default'
+  const skillContext = await loadSkillContext(emit, style)
   return [
     developerSkillPrompt('miniapp_builder'),
     developerSkillsCatalogPrompt(),
@@ -127,7 +136,7 @@ function describeRuntimeSkills(record: MiniappRecord): string {
   ].join('\n')
 }
 
-async function loadSkillContext(emit: Emit): Promise<string> {
+async function loadSkillContext(emit: Emit, style: MiniappStyle): Promise<string> {
   emit({ type: 'status', text: 'Loading developer skills...' })
   const [{ formatSkillInvocation, formatSkillsForSystemPrompt, loadSkills }, { NodeExecutionEnv }] = await Promise.all([
     import('@earendil-works/pi-agent-core'),
@@ -142,13 +151,13 @@ async function loadSkillContext(emit: Emit): Promise<string> {
     }
     const visibleSkills = formatSkillsForSystemPrompt(skills)
     const appliedSkillInvocations = []
-    for (const item of ALWAYS_APPLIED_SKILLS) {
+    for (const item of [appliedDesignSkill(style)]) {
       const skill = skills.find((candidate) => candidate.name === item.name)
       if (!skill) {
         emit({ type: 'status', text: `Skill not found: ${item.name}` })
         continue
       }
-      emit({ type: 'status', text: `Using skill: ${skill.name}` })
+      emit({ type: 'status', text: `Using skill: ${skill.name} (style: ${style})` })
       appliedSkillInvocations.push(formatSkillInvocation(skill, item.instruction))
     }
     return [

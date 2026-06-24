@@ -52,6 +52,7 @@ import type {
   MiniappDraft,
   MiniappRecord,
   MiniappSkill,
+  MiniappStyle,
   PlatformSkill,
   RuntimeAgentRef,
   RuntimeAgentModelConfig,
@@ -1704,6 +1705,8 @@ function SkillPanel({
   const rootRef = useRef<HTMLDivElement>(null)
   const [max, setMax] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [styleOpen, setStyleOpen] = useState(false)
+  const appStyle: MiniappStyle = miniapp.draft?.style ?? 'default'
 
   // Drag the whole header (windowed mode only; ignores clicks on buttons).
   const [d, setD] = useState({ x: 0, y: 0 })
@@ -1955,6 +1958,44 @@ function SkillPanel({
             >
               <MousePointer2 className="size-4" />
             </button>
+          )}
+          {/* Styling selector (mini app only), left of the Preview/Edit toggle */}
+          {isMiniApp && onBuild && (
+            <div className="relative mr-1 flex items-center gap-1.5">
+              <span className="text-[11px] font-medium text-ink-tertiary">Styling</span>
+              <button
+                onClick={() => setStyleOpen((v) => !v)}
+                data-open={styleOpen}
+                aria-label="Choose styling"
+                className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface px-2.5 py-1 text-[12px] font-semibold capitalize text-ink hover:bg-surface-muted"
+              >
+                {appStyle}
+                <ChevronDown className={cn('size-3.5 text-ink-tertiary transition', styleOpen && 'rotate-180')} />
+              </button>
+              {styleOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setStyleOpen(false)} />
+                  <div className="absolute right-0 top-8 z-50 w-40 overflow-hidden rounded-[10px] border border-border bg-surface p-1 shadow-[0_14px_34px_-12px_rgba(25,25,23,0.28)]">
+                    {(['default', 'modern', 'custom'] as const).map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => {
+                          if (s !== appStyle) onUpdateFlow({ draft: { style: s } })
+                          setStyleOpen(false)
+                        }}
+                        className={cn(
+                          'flex w-full items-center justify-between rounded-[7px] px-2.5 py-2 text-left text-[13px] font-medium capitalize hover:bg-surface-muted',
+                          s === appStyle ? 'text-ink' : 'text-ink-secondary',
+                        )}
+                      >
+                        {s}
+                        {s === appStyle && <Check className="size-[14px] text-primary" />}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           )}
           {/* Preview / Edit toggle (mini app only) */}
           {isMiniApp && onBuild && (
