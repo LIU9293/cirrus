@@ -39,7 +39,7 @@ export interface CommunityAgentDefinition {
   /** When true, the in-sandbox adapter DRIVES the native CLI instead of running the
    *  platform-model tool loop. `cliDriver` picks which CLI driver to generate. */
   driveNativeCli?: boolean
-  cliDriver?: 'opencode' | 'openclaw'
+  cliDriver?: 'opencode' | 'openclaw' | 'hermes'
   adapter: 'platform-llm-adapter'
   version: string
   defaultModelConfig: RuntimeAgentModelConfig
@@ -69,9 +69,11 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'framework',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.6.0',
+    version: '0.7.0',
     defaultModelConfig: platformModel(),
     nativeCli: { install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o /tmp/h.sh && bash /tmp/h.sh --skip-setup < /dev/null', bin: 'hermes', risky: true },
+    driveNativeCli: true,
+    cliDriver: 'hermes',
     capabilities: ['multi-agent coordination', 'workflow planning', 'handoff routing', 'status synthesis'],
     systemPrompt:
       'You are Hermes, a runtime coordination agent. Focus on decomposing requests, assigning work to available agents, and explaining orchestration decisions clearly.',
@@ -338,9 +340,53 @@ export async function invoke(payload) {
 `
 }
 
+// Adapter that DRIVES the native `hermes` CLI. Hermes has no free model; its
+// `openrouter` provider honors OPENROUTER_BASE_URL, so we point it at the platform
+// OpenAI-compatible endpoint and run `hermes -z "<prompt>" -m <model> --provider
+// openrouter`, taking stdout (ANSI-stripped) as the reply.
+// TODO(next): bridge platform tools via `hermes mcp`.
+function hermesDriverSource(): string {
+  return `
+export async function invoke(payload) {
+  const { history, model } = payload;
+  const cp = await import('node:child_process');
+  const base = String((model && model.endpoint) || '').replace(/\\/chat\\/completions\\/?$/, '');
+  const key = (model && model.apiKey) || '';
+  const modelId = (model && model.id) || 'gpt-5.5';
+  const turns = Array.isArray(history) ? history : [];
+  const lastUser = [...turns].reverse().find((t) => t.role === 'user') || { content: '' };
+  const prior = turns.slice(0, Math.max(0, turns.length - 1)).map((t) => (t.role === 'user' ? 'User' : 'Assistant') + ': ' + t.content).join('\\n');
+  const message = (prior ? '<conversation_so_far>\\n' + prior + '\\n</conversation_so_far>\\n\\n' : '') + (lastUser.content || '');
+  const emit = (k, t) => { try { console.log('__CIRRUS_EVENT__' + JSON.stringify({ k: k, t: t })); } catch (e) {} };
+  return await new Promise((resolve) => {
+    let settled = false;
+    const done = (r) => { if (!settled) { settled = true; resolve(r); } };
+    const env = { ...process.env, OPENROUTER_API_KEY: key, OPENROUTER_BASE_URL: base, OPENAI_API_KEY: key, OPENAI_BASE_URL: base };
+    let child;
+    try {
+      child = cp.spawn('hermes', ['-z', message, '-m', modelId, '--provider', 'openrouter'], { cwd: '/home/user', env: env, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) { return done({ ok: false, error: 'hermes spawn failed: ' + (e && e.message) }); }
+    let outbuf = '';
+    let errbuf = '';
+    child.stdout.on('data', (d) => { outbuf += d.toString(); });
+    child.stderr.on('data', (d) => { errbuf += d.toString(); });
+    child.on('error', (e) => done({ ok: false, error: 'hermes error: ' + (e && e.message) }));
+    child.on('close', (code) => {
+      const reply = outbuf.replace(/\\x1b\\[[0-9;]*m/g, '').trim();
+      if (!reply) return done({ ok: false, error: 'hermes produced no reply (exit ' + code + '): ' + errbuf.slice(-400) });
+      emit('delta', reply);
+      done({ ok: true, reply: reply, ui: {}, cronRequests: [], posts: [] });
+    });
+  });
+}
+`
+}
+
 function invokeSourceFor(definition: CommunityAgentDefinition): string {
   if (definition.driveNativeCli) {
-    return definition.cliDriver === 'openclaw' ? openclawDriverSource() : opencodeDriverSource(CIRRUS_MCP_SERVER)
+    if (definition.cliDriver === 'openclaw') return openclawDriverSource()
+    if (definition.cliDriver === 'hermes') return hermesDriverSource()
+    return opencodeDriverSource(CIRRUS_MCP_SERVER)
   }
   return `
 export async function invoke(payload) {
@@ -616,8 +662,14 @@ function installCode(definition: CommunityAgentDefinition): string {
     `  const spec = ${JSON.stringify(cli)};`,
     `  if (spec) {`,
     `    try {`,
-    `      const log = cproc.execSync(spec.install, { encoding: 'utf8', timeout: 240000, stdio: ['ignore','pipe','pipe'], shell: '/bin/bash' });`,
-    `      const path = cproc.execSync('command -v ' + spec.bin + ' 2>/dev/null || echo ""', { encoding: 'utf8', shell: '/bin/bash' }).trim();`,
+    // Skip the install if the CLI is already present (e.g. baked into the template) —
+    // re-running heavy installers (hermes/openclaw) on every (re)install is slow.
+    `      let path = cproc.execSync('command -v ' + spec.bin + ' 2>/dev/null || echo ""', { encoding: 'utf8', shell: '/bin/bash' }).trim();`,
+    `      let log = 'already present';`,
+    `      if (!path) {`,
+    `        log = cproc.execSync(spec.install, { encoding: 'utf8', timeout: 240000, stdio: ['ignore','pipe','pipe'], shell: '/bin/bash' });`,
+    `        path = cproc.execSync('command -v ' + spec.bin + ' 2>/dev/null || echo ""', { encoding: 'utf8', shell: '/bin/bash' }).trim();`,
+    `      }`,
     `      let version = '';`,
     `      if (path) { try { version = cproc.execSync((spec.versionCmd || (spec.bin + ' --version')) + ' 2>&1 | head -1', { encoding: 'utf8', timeout: 20000, shell: '/bin/bash' }).trim(); } catch (e) {} }`,
     `      cli = { installed: !!path, bin: spec.bin, path: path || undefined, version: version || undefined, log: String(log).slice(-240) };`,
