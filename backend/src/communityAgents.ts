@@ -39,7 +39,7 @@ export interface CommunityAgentDefinition {
   /** When true, the in-sandbox adapter DRIVES the native CLI instead of running the
    *  platform-model tool loop. `cliDriver` picks which CLI driver to generate. */
   driveNativeCli?: boolean
-  cliDriver?: 'opencode' | 'openclaw' | 'hermes'
+  cliDriver?: 'opencode' | 'openclaw' | 'hermes' | 'codex'
   adapter: 'platform-llm-adapter'
   version: string
   defaultModelConfig: RuntimeAgentModelConfig
@@ -133,9 +133,11 @@ export const COMMUNITY_AGENT_REGISTRY: Record<string, CommunityAgentDefinition> 
     category: 'coding',
     shell: true,
     adapter: 'platform-llm-adapter',
-    version: '0.6.0',
+    version: '0.7.0',
     defaultModelConfig: subscriptionSkeleton('codex'),
     nativeCli: { install: 'npm i -g @openai/codex', bin: 'codex' },
+    driveNativeCli: true,
+    cliDriver: 'codex',
     capabilities: ['software engineering', 'repo inspection', 'implementation planning', 'test strategy'],
     systemPrompt:
       'You are Codex in a Cirrus runtime adapter. Act as a pragmatic software-engineering agent. Mention when native Codex login/subscription auth is not connected.',
@@ -465,10 +467,101 @@ export async function invoke(payload) {
 `
 }
 
+// Adapter that DRIVES the native `codex` CLI. Codex has no free model; we register a
+// custom model provider pointing at the platform OpenAI-compatible endpoint (responses
+// API) and run `codex exec --skip-git-repo-check ... --output-last-message <file>`,
+// reading that file as the reply. Platform tools bridged via `codex mcp add`.
+function codexDriverSource(mcpServerCode: string): string {
+  return `
+export async function invoke(payload) {
+  const { history, model, platform } = payload;
+  const fs = await import('node:fs');
+  const cp = await import('node:child_process');
+  try { fs.mkdirSync('/home/user/cirrus/workspace', { recursive: true }); } catch (e) {}
+  const base = String((model && model.endpoint) || '').replace(/\\/chat\\/completions\\/?$/, '');
+  const key = (model && model.apiKey) || '';
+  const modelId = (model && model.id) || 'gpt-5.5';
+  const emit = (k, t) => { try { console.log('__CIRRUS_EVENT__' + JSON.stringify({ k: k, t: t })); } catch (e) {} };
+
+  const eventsPath = '/tmp/cirrus-evt-' + Date.now() + '-' + Math.floor(Math.random() * 1e6) + '.jsonl';
+  try { fs.writeFileSync(eventsPath, ''); } catch (e) {}
+  fs.writeFileSync('/home/user/.cirrus-mcp-server.cjs', ${JSON.stringify(mcpServerCode)});
+  fs.writeFileSync('/home/user/.cirrus-mcp-ctx.json', JSON.stringify({ eventsPath: eventsPath, agents: (platform && platform.agents) || [], cronJobs: (platform && platform.cronJobs) || [] }));
+  try { cp.execSync('codex mcp add cirrus -- node /home/user/.cirrus-mcp-server.cjs', { timeout: 40000, stdio: 'ignore', shell: '/bin/bash' }); } catch (e) {}
+
+  const turns = Array.isArray(history) ? history : [];
+  const lastUser = [...turns].reverse().find((t) => t.role === 'user') || { content: '' };
+  const prior = turns.slice(0, Math.max(0, turns.length - 1)).map((t) => (t.role === 'user' ? 'User' : 'Assistant') + ': ' + t.content).join('\\n');
+  const toolsNote = 'You have Cirrus platform tools (MCP, prefixed cirrus_): post_message (send the user a progress update mid-task), ask_user (ask with quick-reply buttons then stop), send_image, and cron tools. Use post_message during longer work.';
+  const message = toolsNote + '\\n\\n' + (prior ? '<conversation_so_far>\\n' + prior + '\\n</conversation_so_far>\\n\\n' : '') + (lastUser.content || '');
+  const outFile = '/tmp/cirrus-codex-' + Date.now() + '.txt';
+
+  let evtOffset = 0;
+  const collected = { posts: [], images: [], asks: [], crons: [] };
+  const drainEvents = () => {
+    let raw = '';
+    try { raw = fs.readFileSync(eventsPath, 'utf8'); } catch (e) { return; }
+    if (raw.length <= evtOffset) return;
+    const chunk = raw.slice(evtOffset); evtOffset = raw.length;
+    for (const line of chunk.split('\\n')) {
+      const s = line.trim(); if (!s) continue;
+      let e; try { e = JSON.parse(s); } catch (x) { continue; }
+      if (e.kind === 'post') { collected.posts.push(e.text); emit('post', e.text); }
+      else if (e.kind === 'image') { collected.images.push({ url: e.url, alt: e.alt }); }
+      else if (e.kind === 'ask') { collected.asks.push(e); }
+      else if (e.kind === 'cron') { collected.crons.push(e); }
+    }
+  };
+  const buildExtras = () => {
+    drainEvents();
+    const lastAsk = collected.asks[collected.asks.length - 1];
+    const ui = {};
+    if (lastAsk) { ui.question = lastAsk.question; ui.choices = lastAsk.options; ui.allowFreeText = lastAsk.allowFreeText; }
+    if (collected.images.length) ui.images = collected.images;
+    const cronRequests = collected.crons.map((c) => ({ op: c.op, name: c.name, schedule: c.schedule, message: c.message, targetAgentKey: c.targetAgentKey, id: c.id, patch: c.patch }));
+    return { ui: ui, cronRequests: cronRequests, posts: collected.posts };
+  };
+
+  return await new Promise((resolve) => {
+    let settled = false;
+    let poller = null;
+    const done = (r) => { if (settled) return; settled = true; if (poller) clearInterval(poller); resolve(r); };
+    poller = setInterval(drainEvents, 250);
+    const args = ['exec', '--skip-git-repo-check',
+      '-c', 'model_providers.cirrus.name="cirrus"',
+      '-c', 'model_providers.cirrus.base_url="' + base + '"',
+      '-c', 'model_providers.cirrus.env_key="OPENAI_API_KEY"',
+      '-c', 'model_provider="cirrus"',
+      '-c', 'model="' + modelId + '"',
+      '--output-last-message', outFile, message];
+    let child;
+    try {
+      child = cp.spawn('codex', args, { cwd: '/home/user/cirrus/workspace', env: { ...process.env, OPENAI_API_KEY: key }, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) { return done({ ok: false, error: 'codex spawn failed: ' + (e && e.message) }); }
+    let errbuf = '';
+    child.stdout.on('data', () => {});
+    child.stderr.on('data', (d) => { errbuf += d.toString(); });
+    child.on('error', (e) => done({ ok: false, error: 'codex error: ' + (e && e.message) }));
+    child.on('close', (code) => {
+      let reply = '';
+      try { reply = fs.readFileSync(outFile, 'utf8').trim(); } catch (e) {}
+      const extras = buildExtras();
+      if (!reply && !extras.posts.length && !extras.cronRequests.length && !(extras.ui && extras.ui.choices)) {
+        return done({ ok: false, error: 'codex produced no reply (exit ' + code + '): ' + errbuf.slice(-400) });
+      }
+      if (reply) emit('delta', reply);
+      done({ ok: true, reply: reply || '(done)', ui: extras.ui, cronRequests: extras.cronRequests, posts: extras.posts });
+    });
+  });
+}
+`
+}
+
 function invokeSourceFor(definition: CommunityAgentDefinition): string {
   if (definition.driveNativeCli) {
     if (definition.cliDriver === 'openclaw') return openclawDriverSource(CIRRUS_MCP_SERVER)
     if (definition.cliDriver === 'hermes') return hermesDriverSource(CIRRUS_MCP_SERVER)
+    if (definition.cliDriver === 'codex') return codexDriverSource(CIRRUS_MCP_SERVER)
     return opencodeDriverSource(CIRRUS_MCP_SERVER)
   }
   return `
