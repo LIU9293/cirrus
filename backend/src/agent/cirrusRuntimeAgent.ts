@@ -271,7 +271,7 @@ export async function runCirrusRuntimeAction(
 export async function runCirrusRuntimeChat(
   record: MiniappRecord,
   history: ChatTurn[],
-  opts: { sandboxId?: string | null; routing?: CirrusRuntimeRoutingDecision; agentSpecs?: CirrusRuntimeAgentSpec[]; route?: CirrusRuntimeRoute; binding?: { runtimeId?: string; agentKey?: string } } = {},
+  opts: { sandboxId?: string | null; routing?: CirrusRuntimeRoutingDecision; agentSpecs?: CirrusRuntimeAgentSpec[]; route?: CirrusRuntimeRoute; binding?: { runtimeId?: string; agentKey?: string }; requestScreenshot?: () => Promise<{ ok: boolean; imageUrl?: string; error?: string }> } = {},
 ): Promise<CirrusRuntimeChatOutcome> {
   const activities: DeveloperChatActivity[] = []
   if (opts.routing) activities.push({ kind: 'status', text: `CirrusRuntimeAgent routing: ${opts.routing.mode}` })
@@ -281,6 +281,7 @@ export async function runCirrusRuntimeChat(
     sandboxId: opts.sandboxId,
     cirrusRuntimeContext: cirrusRuntimeContext(opts.routing, opts.agentSpecs),
     binding: opts.binding,
+    requestScreenshot: opts.requestScreenshot,
   })
   return { ...outcome, activities: [...activities, ...(outcome.activities ?? [])] }
 }

@@ -79,6 +79,7 @@ import {
   deleteRuntime as apiDeleteRuntime,
   updateRuntimeName,
   streamRuntimeChat,
+  submitRuntimeCanvasScreenshotResponse,
   listRuntimeCron,
   createRuntimeCron,
   updateRuntimeCron,
@@ -3630,6 +3631,7 @@ function RuntimeWindow({
   const [messages, setMessages] = useState<UiMessage[]>([])
   const [sending, setSending] = useState(false)
   const [loadingRuntime, setLoadingRuntime] = useState(true)
+  const runtimeCanvasRef = useRef<MiniappCanvasHandle>(null)
   const runtimeMiniappId = runtime?.agents.find((a) => a.source === 'own' && a.miniappId)?.miniappId ?? null
   const hasRuntimeMiniapp = !!miniapp?.html
 
@@ -3701,6 +3703,17 @@ function RuntimeWindow({
     setSending(true)
     try {
       for await (const ev of streamRuntimeChat(id, history)) {
+        if (ev.type === 'canvas_screenshot_request') {
+          // The runtime agent (get_current_snapshot) wants to see the mini app.
+          // Capture it if it's open; otherwise report unavailable → state-only.
+          try {
+            const imageUrl = runtimeCanvasRef.current ? await runtimeCanvasRef.current.captureScreenshot() : null
+            await submitRuntimeCanvasScreenshotResponse(id, ev.requestId, imageUrl ? { ok: true, imageUrl } : { ok: false, error: 'Mini app is not open.' })
+          } catch (err) {
+            await submitRuntimeCanvasScreenshotResponse(id, ev.requestId, { ok: false, error: String((err as Error)?.message ?? err) })
+          }
+          continue
+        }
         if (ev.type === 'message') setMessages((prev) => insertPostedMessage(prev, assistantId, ev.text))
         else setMessages((prev) => applyBuildChatEvent(prev, assistantId, ev))
       }
@@ -3970,6 +3983,7 @@ function RuntimeWindow({
                     <div className="min-h-0 flex-1">
                       {miniapp ? (
                         <MiniappCanvas
+                          ref={runtimeCanvasRef}
                           miniapp={miniapp}
                           runtimeId={id}
                           onState={(state, version) =>

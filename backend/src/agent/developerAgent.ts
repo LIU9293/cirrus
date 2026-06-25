@@ -98,7 +98,7 @@ async function buildSystemPrompt(record: MiniappRecord, emit: Emit): Promise<str
     developerSkillsCatalogPrompt(),
     '',
     'Follow the spec exactly. Always end by calling the finish tool after a successful build.',
-    'When visual quality, layout, or styling matters, call screenshot_canvas after building to inspect the rendered canvas before you summarize.',
+    'When visual quality, layout, or styling matters, call get_current_snapshot after building to inspect the rendered canvas (screenshot) and its state before you summarize.',
     '',
     MINIAPP_SPEC,
     '',
@@ -430,27 +430,32 @@ function makeDeveloperTools(
       executionMode: 'sequential',
     },
     {
-      name: 'screenshot_canvas',
-      label: 'Screenshot canvas',
+      name: 'get_current_snapshot',
+      label: 'Get current snapshot',
       description:
-        'Capture the current rendered miniapp canvas as an image for visual review. Use this after building or changing UI when layout, typography, spacing, color, or visual polish matters.',
+        "Get the mini app's current snapshot: a screenshot of the rendered canvas plus its live state. Use this after " +
+        'building or changing UI when layout, typography, spacing, color, or visual polish matters, or whenever you ' +
+        'need to see what the app currently looks like and what data it holds before deciding what to change.',
       parameters: Type.Object({}),
       execute: async () => {
-        emit({ type: 'tool_call', name: 'screenshot_canvas', summary: 'Capturing canvas screenshot for visual review' })
+        emit({ type: 'tool_call', name: 'get_current_snapshot', summary: 'Capturing canvas snapshot (screenshot + state)' })
+        const state = record.state ?? {}
         const result = await requestCanvasScreenshot(record.id, emit)
         if (result.ok && result.imageUrl) {
-          emit({ type: 'tool_result', name: 'screenshot_canvas', ok: true })
+          emit({ type: 'tool_result', name: 'get_current_snapshot', ok: true })
           return imageToolResult(
             {
               ok: true,
-              message: 'Canvas screenshot captured. Review the attached image for visual quality before deciding whether to revise files.',
+              hasScreenshot: true,
+              message: 'Snapshot captured. Review the attached screenshot and the state before deciding whether to revise files.',
+              state,
             },
             result.imageUrl,
           )
         }
         const message = result.error ?? 'Canvas screenshot failed.'
-        emit({ type: 'tool_result', name: 'screenshot_canvas', ok: false, detail: message })
-        return toolResult({ ok: false, error: message })
+        emit({ type: 'tool_result', name: 'get_current_snapshot', ok: false, detail: message })
+        return toolResult({ ok: true, hasScreenshot: false, note: `Screenshot unavailable (${message}); returning state only.`, state })
       },
       executionMode: 'sequential',
     },

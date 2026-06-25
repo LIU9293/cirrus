@@ -75,6 +75,9 @@ export interface RuntimeTurnOptions {
   idPrefix?: string
   /** Live stream sink for community-agent replies (delta tokens + post_message). */
   onStream?: (ev: CommunityStreamEvent) => void
+  /** Lets an own agent's get_current_snapshot tool fetch a live screenshot of the
+   *  rendered mini app from the client (streaming chat only). */
+  requestScreenshot?: () => Promise<{ ok: boolean; imageUrl?: string; error?: string }>
 }
 
 /**
@@ -131,6 +134,7 @@ export async function executeRuntimeTurn(
       agentSpecs,
       route,
       binding: { runtimeId: runtime.id, agentKey: selectedAgent!.key },
+      requestScreenshot: opts.requestScreenshot,
     })
     message = outcome.message
     activities = outcome.activities ?? []

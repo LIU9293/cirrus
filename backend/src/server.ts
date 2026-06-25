@@ -17,7 +17,7 @@ import { executeRuntimeTurn, installRuntimeCommunityAgents } from './agent/runti
 import { runCronAssistant } from './agent/cronAssistant.ts'
 import { listCronJobs, getCronJob, createCronJob, updateCronJob, deleteCronJob } from './cronStore.ts'
 import { isValidCron } from './cron.ts'
-import { resolveCanvasScreenshot } from './canvasScreenshot.ts'
+import { resolveCanvasScreenshot, requestCanvasScreenshot } from './canvasScreenshot.ts'
 import { PLATFORM_SKILLS } from './skills/library.ts'
 import { resolveSkillSettings, writeSkillSettings, settingsFilled, declaredSettings, skillBindingKey, type SkillBindingContext } from './skills/settings.ts'
 import { planAndAttachSkills, developSkill, refineFile, chatAboutSkill, chatAboutSurface, analyzeSkill } from './skills/service.ts'
@@ -566,6 +566,24 @@ app.post('/api/miniapps/:id/canvas-screenshot-responses', async (req, res) => {
   res.json({ ok: resolved })
 })
 
+// The runtime window submits a captured mini app screenshot here, resolving the
+// runtime agent's get_current_snapshot request (keyed by runtime id).
+app.post('/api/runtimes/:id/canvas-screenshot-responses', async (req, res) => {
+  const runtime = await loadRuntime(req.params.id)
+  if (!runtime) return res.status(404).json({ error: 'not found' })
+  const requestId = String(req.body?.requestId ?? '')
+  const imageUrl = typeof req.body?.imageUrl === 'string' ? req.body.imageUrl : ''
+  const error = typeof req.body?.error === 'string' ? req.body.error : ''
+  const ok = req.body?.ok === true && imageUrl.startsWith('data:image/')
+  if (!requestId) return res.status(400).json({ error: 'requestId is required' })
+  const resolved = resolveCanvasScreenshot(runtime.id, requestId, {
+    ok,
+    ...(ok ? { imageUrl } : {}),
+    ...(!ok ? { error: error || 'Mini app screenshot unavailable.' } : {}),
+  })
+  res.json({ ok: resolved })
+})
+
 // Developer-agent chat: streams build progress as Server-Sent Events.
 app.post('/api/miniapps/:id/chat', async (req, res) => {
   const record = await loadRecord(req.params.id)
@@ -849,7 +867,10 @@ app.post('/api/runtimes/:id/chat', async (req, res) => {
         else emit({ type: 'message', text: ev.text })
       }
     : undefined
-  const { message, activities, durationMs, ui, posts } = await executeRuntimeTurn(runtime, history, { persist: true, onStream })
+  // Streaming chat can ask the runtime window for a live screenshot of the mini
+  // app (get_current_snapshot). Non-stream callers (cron/bots/API) get state only.
+  const requestScreenshot = wantsStream ? () => requestCanvasScreenshot(runtime.id, emit) : undefined
+  const { message, activities, durationMs, ui, posts } = await executeRuntimeTurn(runtime, history, { persist: true, onStream, requestScreenshot })
 
   if (wantsStream) {
     for (const activity of activities) emit(activityToEvent(activity))

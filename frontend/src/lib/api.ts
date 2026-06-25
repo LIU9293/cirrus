@@ -463,6 +463,20 @@ export async function submitCanvasScreenshotResponse(
   )
 }
 
+export async function submitRuntimeCanvasScreenshotResponse(
+  runtimeId: string,
+  requestId: string,
+  result: { ok: boolean; imageUrl?: string; error?: string },
+): Promise<void> {
+  await json<{ ok: boolean }>(
+    await fetch(`/api/runtimes/${runtimeId}/canvas-screenshot-responses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId, ...result }),
+    }),
+  )
+}
+
 /** Streams developer-agent events over SSE. */
 /* ───────── Runtimes ───────── */
 

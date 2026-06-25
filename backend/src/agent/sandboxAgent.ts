@@ -171,6 +171,7 @@ export async function runRuntimeAgentLoopInSandbox(
   system: string,
   history: ChatTurn[],
   binding?: { runtimeId?: string; agentKey?: string },
+  requestScreenshot?: () => Promise<{ ok: boolean; imageUrl?: string; error?: string }>,
 ): Promise<SandboxRuntimeAgentResult> {
   const activities: DeveloperChatActivity[] = [{ kind: 'status', text: 'Running CirrusRuntimeAgent loop in E2B sandbox…' }]
   const userTurn = history.at(-1)
@@ -182,6 +183,7 @@ export async function runRuntimeAgentLoopInSandbox(
   const ui: RuntimeMessageUi = {}
   const runtimeTools = await makeRuntimeTools(Type as any, record, { record, ...binding }, {
     ui,
+    requestScreenshot,
     onActivity: (activity) => {
       const mapped = mapActivity(activity)
       if (mapped) activities.push(mapped)

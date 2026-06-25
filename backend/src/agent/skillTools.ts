@@ -38,6 +38,50 @@ export interface RuntimeMessageUi {
 export interface RuntimeToolOptions {
   onActivity?: (activity: RuntimeToolActivity) => void
   ui?: RuntimeMessageUi
+  /** When present, the snapshot tool can fetch a live screenshot of the rendered
+   *  mini app from the client. Absent in headless contexts (cron/bots/API) or when
+   *  the user doesn't have the mini app open → the tool returns state only. */
+  requestScreenshot?: () => Promise<{ ok: boolean; imageUrl?: string; error?: string }>
+}
+
+/** Parse a data:image/...;base64,... URL into pi-agent image content (for vision). */
+function dataUrlToImageContent(imageUrl: string) {
+  const match = imageUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/)
+  if (!match) return null
+  return { type: 'image' as const, data: match[2], mimeType: match[1] }
+}
+
+/** Lets the agent SEE the mini app: its live state always, plus a screenshot of
+ *  what the user is currently looking at when one is available (vision model). */
+function getCurrentSnapshotTool(Type: Type, record: MiniappRecord, opts: RuntimeToolOptions): AgentTool {
+  return {
+    name: 'get_current_snapshot',
+    label: 'Get current snapshot',
+    description:
+      "Get the mini app's current snapshot: its live state, plus a screenshot of what the user is seeing when the " +
+      'mini app is open. Call this to ground your answer in the actual UI and data before responding to questions ' +
+      'about the app or what the user is looking at.',
+    parameters: Type.Object({}),
+    execute: async () => {
+      const state = record.state ?? {}
+      if (opts.requestScreenshot) {
+        const shot = await opts.requestScreenshot()
+        if (shot.ok && shot.imageUrl) {
+          const image = dataUrlToImageContent(shot.imageUrl)
+          return {
+            content: [
+              { type: 'text' as const, text: JSON.stringify({ ok: true, hasScreenshot: true, state }) },
+              ...(image ? [image] : []),
+            ],
+            details: { ok: true, hasScreenshot: true },
+          } as ReturnType<typeof toolResult>
+        }
+        return toolResult({ ok: true, hasScreenshot: false, note: shot.error || 'Screenshot unavailable (mini app not open); state only.', state })
+      }
+      return toolResult({ ok: true, hasScreenshot: false, note: 'No screenshot channel in this context; state only.', state })
+    },
+    executionMode: 'sequential',
+  }
 }
 
 function toolResult(payload: unknown, terminate = false) {
@@ -1023,8 +1067,8 @@ export async function makeRuntimeTools(
   const hasGmail = active.some((s) => s.platformSkillId === 'gmail') || (await listAgentTree(record.id)).tools.includes('gmail_fetch.ts')
   if (hasGmail) add(inboxTriageTool(Type, record))
 
-  // Always-available runtime abilities: state, talking back to the user, images.
-  const base: AgentTool[] = [patchStateTool(Type, record), askUserTool(Type, opts), sendImageTool(Type, opts)]
+  // Always-available runtime abilities: see the app, state, talk back, images.
+  const base: AgentTool[] = [getCurrentSnapshotTool(Type, record, opts), patchStateTool(Type, record), askUserTool(Type, opts), sendImageTool(Type, opts)]
   // Inside a runtime, the agent can also manage its own scheduled tasks (cron).
   if (ctx.runtimeId) base.push(...makeCronTools(Type, ctx.runtimeId))
 

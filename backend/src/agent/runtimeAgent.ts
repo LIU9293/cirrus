@@ -88,6 +88,7 @@ async function runAgent(
   system: string,
   history: ChatTurn[],
   binding?: RuntimeBinding,
+  requestScreenshot?: RuntimeChatExtras['requestScreenshot'],
 ): Promise<{ message: string; patched: boolean; activities: DeveloperChatActivity[]; ui: RuntimeMessageUi }> {
   const activities: DeveloperChatActivity[] = []
   const ui: RuntimeMessageUi = {}
@@ -100,6 +101,7 @@ async function runAgent(
 
   const tools = await makeRuntimeTools(Type, record, { record, ...binding }, {
     ui,
+    requestScreenshot,
     onActivity: (activity) => {
       if (activity.kind === 'call') activities.push({ kind: 'tool', text: activity.summary })
       else if (!activity.ok) activities.push({ kind: 'error', text: `${activity.name} failed${activity.detail ? `: ${activity.detail}` : ''}`, ok: false })
@@ -241,10 +243,19 @@ export async function runRuntimeAction(
   }
 }
 
+export interface RuntimeChatExtras {
+  sandboxId?: string | null
+  cirrusRuntimeContext?: string
+  binding?: RuntimeBinding
+  /** Lets the runtime agent's get_current_snapshot tool fetch a live screenshot
+   *  of the rendered mini app from the client (streaming chat only). */
+  requestScreenshot?: () => Promise<{ ok: boolean; imageUrl?: string; error?: string }>
+}
+
 export async function runRuntimeChat(
   record: MiniappRecord,
   history: ChatTurn[],
-  opts: { sandboxId?: string | null; cirrusRuntimeContext?: string; binding?: RuntimeBinding } = {},
+  opts: RuntimeChatExtras = {},
 ): Promise<RuntimeChatOutcome> {
   const manifest = record.manifest
   const soul = await soulBlock(record)
@@ -273,8 +284,8 @@ export async function runRuntimeChat(
   ].join('\n')
 
   const { message, patched, activities, ui } = opts.sandboxId
-    ? await runRuntimeAgentLoopInSandbox(record, opts.sandboxId, system, history, opts.binding)
-    : await runAgent(record, system, history, opts.binding)
+    ? await runRuntimeAgentLoopInSandbox(record, opts.sandboxId, system, history, opts.binding, opts.requestScreenshot)
+    : await runAgent(record, system, history, opts.binding, opts.requestScreenshot)
   // If the agent only called ask_user (no prose), use its question as the body.
   const body = message || ui?.question || (patched ? 'Updated.' : 'I can help with this app.')
   return {
