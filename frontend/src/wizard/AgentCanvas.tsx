@@ -1880,7 +1880,7 @@ function SkillPanel({
         e.stopPropagation()
         onFront()
       }}
-      className={cn('absolute z-50 cursor-default select-text', max ? 'inset-x-6 top-[100px] bottom-6' : 'left-1/2 top-1/2')}
+      className={cn('absolute z-[265] cursor-default select-text', max ? 'inset-x-6 top-[100px] bottom-6' : 'left-1/2 top-1/2')}
       style={max ? undefined : { width: size.w, transform: `translate(calc(-50% + ${d.x}px), calc(-50% + ${d.y}px))` }}
     >
       <div
@@ -5327,7 +5327,6 @@ export function BuildChat({
                 onScroll={() => {
                   if (overlayRef.current && inputRef.current) overlayRef.current.scrollTop = inputRef.current.scrollTop
                 }}
-                disabled={building}
                 placeholder={placeholder}
                 className={cn(
                   'relative z-10 block w-full resize-none overflow-y-auto bg-transparent py-1 text-[13px] leading-[18px] outline-none caret-ink placeholder:text-ink-tertiary disabled:opacity-60',
@@ -5364,7 +5363,13 @@ function BuildMsg({ m, working = false, isLast = false, onChoice }: { m: UiMessa
   const [expanded, setExpanded] = useState(false)
   if (m.role === 'user') {
     return (
-      <div className="flex justify-end">
+      <div className="flex flex-col items-end gap-1">
+        {m.selectionAttachment && (
+          <div className="inline-flex max-w-[85%] items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-1 text-[11px] font-medium text-accent-ink">
+            <MousePointer2 className="size-3 shrink-0" />
+            <span className="truncate">{m.selectionAttachment.label}</span>
+          </div>
+        )}
         <div className="max-w-[85%] rounded-[14px] rounded-br-[4px] bg-primary px-3 py-2 text-[13px] leading-snug text-primary-foreground">
           {m.content}
         </div>
