@@ -14,6 +14,7 @@ import {
   runCirrusRuntimeChat,
 } from './agent/cirrusRuntimeAgent.ts'
 import { executeRuntimeTurn, installRuntimeCommunityAgents } from './agent/runtimeTurn.ts'
+import { startTelegramListeners, reconcileTelegramListeners } from './bots/telegram.ts'
 import { runCronAssistant } from './agent/cronAssistant.ts'
 import { listCronJobs, getCronJob, createCronJob, updateCronJob, deleteCronJob } from './cronStore.ts'
 import { isValidCron } from './cron.ts'
@@ -1111,6 +1112,7 @@ app.post('/api/runtimes/:id/bots', async (req, res) => {
   }
   runtime.bots.push(bot)
   await saveRuntime(runtime)
+  void reconcileTelegramListeners() // pick up the new Telegram bot immediately
   res.json({ runtime: publicRuntime(runtime) })
 })
 
@@ -1119,6 +1121,7 @@ app.delete('/api/runtimes/:id/bots/:botId', async (req, res) => {
   if (!runtime) return res.status(404).json({ error: 'not found' })
   runtime.bots = runtime.bots.filter((b) => b.id !== req.params.botId)
   await saveRuntime(runtime)
+  void reconcileTelegramListeners() // stop the poller for the removed bot
   res.json({ runtime: publicRuntime(runtime) })
 })
 
@@ -1135,6 +1138,7 @@ async function start() {
   app.listen(config.port, () => {
     console.log(`[cirrus] backend on http://localhost:${config.port} (model: ${config.model})`)
     void startScheduler().catch((err) => console.error('[scheduler] failed to start', err))
+    startTelegramListeners()
   })
 }
 void start()
