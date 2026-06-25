@@ -75,7 +75,7 @@ function makeModel(): Model<'openai-completions'> {
     api: 'openai-completions',
     provider: 'openai',
     baseUrl: config.baseURL,
-    reasoning: false,
+    reasoning: true,
     input: ['text', 'image'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128000,
@@ -83,7 +83,7 @@ function makeModel(): Model<'openai-completions'> {
     compat: {
       maxTokensField: 'max_completion_tokens',
       supportsDeveloperRole: false,
-      supportsReasoningEffort: false,
+      supportsReasoningEffort: true,
       supportsStore: false,
       supportsUsageInStreaming: false,
     },
@@ -215,13 +215,22 @@ export async function runDeveloperAgent(
     import('@earendil-works/pi-agent-core'),
     import('@earendil-works/pi-ai'),
   ])
+  // One continuous session per miniapp: reload the agent's own prior transcript
+  // (its tool calls, builds, decisions — not just the chat text) so it remembers
+  // how this app was developed. Falls back to the replayed chat history for apps
+  // built before transcripts were persisted.
+  const priorTranscript = Array.isArray(record.devTranscript) ? (record.devTranscript as AgentMessage[]) : null
+  const seededMessages =
+    priorTranscript && priorTranscript.length
+      ? priorTranscript
+      : history.slice(0, -1).map((turn, index) => turnToAgentMessage(turn, model, index))
   const agent = new Agent({
     initialState: {
       systemPrompt: await buildSystemPrompt(record, emit),
       model,
-      thinkingLevel: 'off',
+      thinkingLevel: 'high',
       tools: makeDeveloperTools(Type, record, emit, runState),
-      messages: history.slice(0, -1).map((turn, index) => turnToAgentMessage(turn, model, index)),
+      messages: seededMessages,
     },
     getApiKey: () => config.apiKey,
     toolExecution: 'sequential',
@@ -241,8 +250,56 @@ export async function runDeveloperAgent(
     emit({ type: 'error', message: `Pi agent failed: ${String((err as Error)?.message ?? err)}` })
   }
 
+  // Persist the full transcript for next turn's memory. Strip image blobs (kept
+  // only for the in-flight turn) so the stored session stays small; tool-call /
+  // tool-result pairing is preserved (no message dropping) so it reloads cleanly.
+  try {
+    record.devTranscript = sanitizeTranscript(agent.state.messages)
+    await saveRecord(record)
+  } catch {
+    /* memory persistence is best-effort; never fail the turn over it */
+  }
+
   emit({ type: 'done' })
   return record
+}
+
+// Roughly bound the persisted session so it can't grow past the context window
+// over a long dev session. Tuned well below the 128k window to leave room for the
+// system prompt + the live turn's tool results.
+const TRANSCRIPT_CHAR_BUDGET = 300_000
+
+/** Prepare the agent transcript for persistence: drop image blobs (kept only for
+ *  the in-flight turn), then keep the most recent messages within a char budget,
+ *  starting at a user turn so tool_call/tool_result pairing stays valid. */
+function sanitizeTranscript(messages: AgentMessage[]): AgentMessage[] {
+  const stripped = messages.map((m) => {
+    const content = (m as { content?: unknown }).content
+    if (!Array.isArray(content)) return m
+    let changed = false
+    const next = content.map((part: unknown) => {
+      if (part && typeof part === 'object' && (part as { type?: string }).type === 'image') {
+        changed = true
+        return { type: 'text' as const, text: '[screenshot omitted from memory]' }
+      }
+      return part
+    })
+    return changed ? ({ ...m, content: next } as AgentMessage) : m
+  })
+
+  // Keep newest-first within the budget, then restore order.
+  let total = 0
+  const kept: AgentMessage[] = []
+  for (let i = stripped.length - 1; i >= 0; i--) {
+    const size = JSON.stringify(stripped[i]).length
+    if (kept.length && total + size > TRANSCRIPT_CHAR_BUDGET) break
+    total += size
+    kept.unshift(stripped[i])
+  }
+  // A truncated transcript must start on a user turn, otherwise the first message
+  // could be an orphaned tool result the model rejects on reload.
+  while (kept.length && (kept[0] as { role?: string }).role !== 'user') kept.shift()
+  return kept
 }
 
 function turnToAgentMessage(turn: ChatTurn, model: Model<'openai-completions'>, index: number): AgentMessage {
@@ -465,7 +522,9 @@ function makeDeveloperTools(
       description: 'Build the miniapp into a single self-contained HTML file. Returns success or the build error log.',
       parameters: Type.Object({}),
       execute: async () => {
-        emit({ type: 'tool_call', name: 'build', summary: 'Building the miniapp...' })
+        // Build is its own status line (not a generic tool call) so the user sees
+        // a clear "Building the mini app…" while the bundler runs.
+        emit({ type: 'status', text: 'Building the mini app…' })
         record.status = 'building'
         saveRecord(record)
         const result = await buildMiniapp(record.id)
@@ -475,7 +534,6 @@ function makeDeveloperTools(
           record.buildError = null
           saveRecord(record)
           emit({ type: 'build', ok: true })
-          emit({ type: 'tool_result', name: 'build', ok: true })
           emit({ type: 'record', record })
           return toolResult({ ok: true, message: 'Build succeeded. The miniapp is live in the canvas.' })
         }
@@ -483,7 +541,6 @@ function makeDeveloperTools(
         record.buildError = result.error ?? 'Unknown build error'
         saveRecord(record)
         emit({ type: 'build', ok: false, error: record.buildError })
-        emit({ type: 'tool_result', name: 'build', ok: false, detail: 'build failed' })
         emit({ type: 'record', record })
         return toolResult({ ok: false, error: record.buildError })
       },

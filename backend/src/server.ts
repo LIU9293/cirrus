@@ -71,7 +71,9 @@ app.use('/api/runtimes/:id', requireOwnRuntime)
 
 // Strip the built html from list responses to keep them light.
 function summary(record: MiniappRecord) {
-  const { html, ...rest } = record
+  // devTranscript is the dev agent's server-side memory (can be large) — never
+  // ship it to the client.
+  const { html, devTranscript: _devTranscript, ...rest } = record
   return { ...rest, hasHtml: !!html }
 }
 

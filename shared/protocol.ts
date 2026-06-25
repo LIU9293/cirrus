@@ -336,6 +336,10 @@ export interface MiniappRecord {
   liveMessages: DeveloperChatMessage[]
   /** The Define-step onboarding conversation with the concept agent. */
   defineMessages?: DeveloperChatMessage[]
+  /** The developer pi-agent's own raw transcript (tool calls/results, builds) for
+   *  this miniapp — its development "memory". Server-side only; stripped from the
+   *  client summary. Shape is pi-agent AgentMessage[]. */
+  devTranscript?: unknown[]
   updatedAt: string
 }
 
