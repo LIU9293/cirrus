@@ -5,8 +5,8 @@
 // pulls it directly; E2B needs it wrapped as a template — that's all this does now.
 //
 //   1. Build & push the public image first:
-//        docker build -t ghcr.io/cirrus-run/cirrus-runtime:latest backend/runtime-image
-//        docker push  ghcr.io/cirrus-run/cirrus-runtime:latest
+//        docker build -t ghcr.io/liu9293/cirrus-runtime:latest backend/runtime-image
+//        docker push  ghcr.io/liu9293/cirrus-runtime:latest
 //   2. Then register it as the E2B template:
 //        E2B_API_KEY=... node --import tsx src/scripts/buildRuntimeTemplate.ts
 //

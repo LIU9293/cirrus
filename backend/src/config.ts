@@ -40,7 +40,7 @@ export const config = {
    *  the runtime environment. Daytona pulls it directly at create; the E2B template
    *  is built FROM it. Publish to a public registry so users' own sandbox keys (which
    *  authenticate a different org) can still pull it. */
-  runtimeImage: process.env.RUNTIME_IMAGE ?? 'ghcr.io/cirrus-run/cirrus-runtime:latest',
+  runtimeImage: process.env.RUNTIME_IMAGE ?? 'ghcr.io/liu9293/cirrus-runtime:latest',
   port: Number(process.env.PORT ?? 3000),
   // Repo roots, resolved from backend/src.
   repoRoot: resolve(here, '..', '..'),

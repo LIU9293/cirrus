@@ -16,8 +16,8 @@
 # working; it also carries a system Node that Daytona's `codeRun` uses.
 #
 # Build & publish (publish to a PUBLIC registry so any user's key can pull it):
-#   docker build -t ghcr.io/cirrus-run/cirrus-runtime:latest backend/runtime-image
-#   docker push  ghcr.io/cirrus-run/cirrus-runtime:latest
+#   docker build -t ghcr.io/liu9293/cirrus-runtime:latest backend/runtime-image
+#   docker push  ghcr.io/liu9293/cirrus-runtime:latest
 # Then set RUNTIME_IMAGE to the pushed tag (config.ts default points here).
 FROM e2bdev/code-interpreter:latest
 
