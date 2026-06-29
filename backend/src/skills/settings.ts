@@ -124,9 +124,12 @@ export async function resolveSkillSettings(ctx: SkillBindingContext, skill: Mini
     ...bindingConfig,
   }
 
-  // The value bag the tool layer reads (creds.base_url, creds.token, …). Runtime
-  // sources override the agent dev fallback; secret store overrides non-secret config.
+  // The value bag the tool layer reads (creds.base_url, creds.token, …) and the
+  // settings form prefills from. The skill's declared non-secret defaults are the
+  // lowest layer (so e.g. imap_host=imap.gmail.com shows up without re-typing);
+  // dev/runtime bindings and secrets override them.
   const credentials: Record<string, string> = {
+    ...stringifyValues(settingDefaults),
     ...(await readDevSecrets(ctx.record, bindingKey)),
     ...stringifyValues(bindingConfig),
     ...(await readRuntimeSecrets(ctx, bindingKey)),

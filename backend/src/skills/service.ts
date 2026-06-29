@@ -6,6 +6,8 @@ import { writeAgentFile, readAgentFile } from '../agentfs.ts'
 import { getSandboxDriver } from '../sandbox/index.ts'
 import { planSkills } from './planner.ts'
 import { findPlatformSkill, matchPlatformSkill, PLATFORM_SKILLS } from './library.ts'
+import { listSkills } from './store.ts'
+import { buildSkillInstance } from './standalone.ts'
 import { developerSkillPrompt } from '../agent/developerSkills.ts'
 import type {
   MiniappRecord,
@@ -15,6 +17,7 @@ import type {
   SkillDevelopMethod,
   SkillPlan,
   SkillPlanItem,
+  SkillRecord,
   SkillToolCall,
 } from '../../../shared/protocol.ts'
 
@@ -61,15 +64,46 @@ export interface PlanResult {
   needsDev: number
 }
 
-/** Analyse the goal, attach the resulting skills to the record, and persist. */
+const normName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+
+/** A planned capability matches an authored skill if the skill's (normalized) name
+ *  equals or appears in the item's name/capability/provider. Lets "qq_mailbox" or a
+ *  "manage QQ + Gmail email" capability resolve to the user's own "QQ Mailbox" skill. */
+function matchAuthoredSkill(item: SkillPlanItem, authored: SkillRecord[]): SkillRecord | undefined {
+  const keys = [item.name, item.capability, (item as { connectProvider?: string }).connectProvider]
+    .filter((v): v is string => !!v)
+    .map(normName)
+  return authored.find((a) => {
+    const an = normName(a.name)
+    return an.length >= 3 && keys.some((k) => k === an || k.includes(an))
+  })
+}
+
+/** Analyse the goal, attach the resulting skills to the record, and persist.
+ *  Prefers the user's OWN authored skills over inventing library/custom ones, so
+ *  authoring a skill and building an agent stay one connected flow. */
 export async function planAndAttachSkills(record: MiniappRecord): Promise<PlanResult> {
   const goal = record.draft?.goal ?? record.manifest?.description ?? ''
   const name = record.draft?.name ?? record.manifest?.name
   const plan = await planSkills(goal, name)
-  const skills = plan.items.map(planItemToSkill)
   // Re-load the record after the (slow) planning call so we don't clobber a
   // creationPhase the user advanced to while planning was in flight.
   const fresh = (await loadRecord(record.id)) ?? record
+  const authored = fresh.ownerId ? await listSkills(fresh.ownerId) : []
+
+  const skills: MiniappSkill[] = []
+  const usedAuthored = new Set<string>()
+  for (const item of plan.items) {
+    const match = matchAuthoredSkill(item, authored)
+    if (match) {
+      if (usedAuthored.has(match.id)) continue // a single authored skill covers this capability already
+      usedAuthored.add(match.id)
+      skills.push(await buildSkillInstance(match, fresh))
+    } else {
+      skills.push(planItemToSkill(item))
+    }
+  }
+
   fresh.skills = skills
   await saveRecord(fresh)
   record.skills = skills

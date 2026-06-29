@@ -3,7 +3,7 @@ import { config } from '../config.ts'
 import type { ActionSpec, DeveloperChatActivity, MiniappRecord } from '../../../shared/protocol.ts'
 import type { ChatTurn } from './developerAgent.ts'
 import { makeRuntimeTools, describeSkills, type RuntimeMessageUi } from './skillTools.ts'
-import { readSoul } from '../agentfs.ts'
+import { readAgentReadme } from '../agentfs.ts'
 import { saveRecord } from '../store.ts'
 import { runInboxTriage } from '../apps/inboxTriage.ts'
 import { runRuntimeAgentLoopInSandbox } from './sandboxAgent.ts'
@@ -15,10 +15,10 @@ export interface RuntimeBinding {
   agentKey?: string
 }
 
-/** The agent's soul (what it does) — prepended to the runtime system prompt. */
-async function soulBlock(record: MiniappRecord): Promise<string> {
-  const soul = (await readSoul(record.id))?.trim()
-  return soul ? `The agent's soul (what you are and what you do):\n${soul}\n` : ''
+/** The agent README (what it is and does) — prepended to the runtime system prompt. */
+async function agentReadmeBlock(record: MiniappRecord): Promise<string> {
+  const readme = (await readAgentReadme(record.id))?.trim()
+  return readme ? `The agent README (what you are and what you do):\n${readme}\n` : ''
 }
 
 // The runtime agent answers a miniapp's kind:"agent" action and powers live chat.
@@ -203,11 +203,11 @@ export async function runRuntimeAction(
 
   const sandboxId = sandboxIdFromPayload(payload)
   const manifest = record.manifest
-  const soul = await soulBlock(record)
+  const agentReadme = await agentReadmeBlock(record)
   const system = [
     `You are the runtime agent for the miniapp "${manifest?.name ?? record.id}".`,
     runtimeEnvironmentBlock(sandboxId),
-    soul,
+    agentReadme,
     'A UI control invoked an action. When the instruction names or implies one of your skills, CALL that',
     "skill's tool to do the work (don't do it inline) — that keeps the app's capabilities explicit. Then call",
     'patch_state to update the shared state the UI renders from. Keep state JSON-serializable and minimal.',
@@ -258,12 +258,12 @@ export async function runRuntimeChat(
   opts: RuntimeChatExtras = {},
 ): Promise<RuntimeChatOutcome> {
   const manifest = record.manifest
-  const soul = await soulBlock(record)
+  const agentReadme = await agentReadmeBlock(record)
   const system = [
     `You are the live app agent for the miniapp "${manifest?.name ?? record.id}".`,
     runtimeEnvironmentBlock(opts.sandboxId),
     opts.cirrusRuntimeContext ? `CirrusRuntimeAgent context:\n${opts.cirrusRuntimeContext}` : '',
-    soul,
+    agentReadme,
     'You are talking to an end user using the app. Help them use it. When they ask you to change app data,',
     'call patch_state to shallow-merge JSON-serializable updates into the shared state.',
     'IMPORTANT: for anything about the app\'s OWN data/records (datasets, saved rows), you MUST call the relevant',

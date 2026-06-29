@@ -14,6 +14,10 @@ import type {
   RuntimeRecord,
   SkillDevelopMethod,
   SkillPlan,
+  SkillRecord,
+  SkillSetting,
+  SkillTemplate,
+  SkillToolCall,
 } from '@shared/protocol'
 
 export interface SkillPlanResult {
@@ -264,7 +268,9 @@ export async function clarifyConcept(id: string, history: ChatTurn[], context?: 
 }
 
 export interface AgentTree {
-  soul: boolean
+  agent: boolean
+  /** @deprecated Older servers returned `soul`; use `agent`. */
+  soul?: boolean
   tools: string[]
   skills: string[]
   data: string[]
@@ -375,6 +381,147 @@ export async function chatAboutSurface(
 export async function listSkillLibrary(): Promise<PlatformSkill[]> {
   const data = await json<{ skills: PlatformSkill[] }>(await fetch('/api/skills/library'))
   return data.skills
+}
+
+/* ───────── Standalone, reusable skills ───────── */
+
+export interface DraftSkillResult {
+  name: string
+  category: SkillRecord['category']
+  description: string
+  readme: string
+  tools: SkillToolCall[]
+  credentials: SkillSetting[]
+  summary: string
+  templateId?: string
+}
+
+export async function draftStandaloneSkill(description: string): Promise<DraftSkillResult> {
+  return json<DraftSkillResult>(
+    await fetch('/api/skills/draft', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ description }),
+    }),
+  )
+}
+
+export async function listSkillTemplates(): Promise<SkillTemplate[]> {
+  const data = await json<{ templates: SkillTemplate[] }>(await fetch('/api/skills/templates', { credentials: 'include' }))
+  return data.templates
+}
+
+export async function listMySkills(): Promise<SkillRecord[]> {
+  const data = await json<{ skills: SkillRecord[] }>(await fetch('/api/skills/mine', { credentials: 'include' }))
+  return data.skills
+}
+
+export async function listCommunitySkills(): Promise<SkillRecord[]> {
+  const data = await json<{ skills: SkillRecord[] }>(await fetch('/api/skills/community', { credentials: 'include' }))
+  return data.skills
+}
+
+export async function getSkill(id: string): Promise<SkillRecord> {
+  const data = await json<{ skill: SkillRecord }>(await fetch(`/api/skills/${id}`, { credentials: 'include' }))
+  return data.skill
+}
+
+export type SkillInput = Partial<Pick<SkillRecord, 'name' | 'category' | 'description' | 'readme' | 'tools' | 'credentials' | 'visibility'>>
+
+export async function createSkill(input: SkillInput): Promise<SkillRecord> {
+  const data = await json<{ skill: SkillRecord }>(
+    await fetch('/api/skills', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(input),
+    }),
+  )
+  return data.skill
+}
+
+export async function updateSkill(id: string, input: SkillInput): Promise<SkillRecord> {
+  const data = await json<{ skill: SkillRecord }>(
+    await fetch(`/api/skills/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(input),
+    }),
+  )
+  return data.skill
+}
+
+export async function deleteSkill(id: string): Promise<void> {
+  await fetch(`/api/skills/${id}`, { method: 'DELETE', credentials: 'include' })
+}
+
+export async function listSkillFiles(id: string): Promise<string[]> {
+  const data = await json<{ paths: string[] }>(await fetch(`/api/skills/${id}/files`, { credentials: 'include' }))
+  return data.paths
+}
+
+export async function getSkillFile(id: string, path: string): Promise<string> {
+  const data = await json<{ content: string }>(
+    await fetch(`/api/skills/${id}/file?path=${encodeURIComponent(path)}`, { credentials: 'include' }),
+  )
+  return data.content
+}
+
+export async function putSkillFile(id: string, path: string, content: string): Promise<{ status: SkillRecord['status'] }> {
+  return json<{ status: SkillRecord['status'] }>(
+    await fetch(`/api/skills/${id}/file`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ path, content }),
+    }),
+  )
+}
+
+export async function generateSkillTool(id: string, toolName: string, notes = ''): Promise<{ ok: boolean; path: string; content: string; message: string }> {
+  return json(
+    await fetch(`/api/skills/${id}/tools/${encodeURIComponent(toolName)}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ notes }),
+    }),
+  )
+}
+
+export async function refineSkillFile(id: string, path: string, instruction: string): Promise<{ ok: boolean; path: string; content: string; message: string }> {
+  return json(
+    await fetch(`/api/skills/${id}/file/refine`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ path, instruction }),
+    }),
+  )
+}
+
+export async function testSkillFile(id: string, path: string, input: Record<string, unknown> = {}): Promise<{ ok: boolean; stdout: string; stderr: string; error?: string }> {
+  return json(
+    await fetch(`/api/skills/${id}/file/test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ path, input }),
+    }),
+  )
+}
+
+export async function installSkillOnAgent(id: string, miniappId: string): Promise<{ ok: boolean; message: string }> {
+  return json(
+    await fetch(`/api/skills/${id}/install`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ miniappId }),
+    }),
+  )
 }
 
 export async function planSkills(id: string): Promise<SkillPlanResult> {

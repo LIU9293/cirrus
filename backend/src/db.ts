@@ -69,10 +69,29 @@ create index if not exists miniapps_owner_idx on miniapps(owner_id);
 
 create table if not exists miniapp_files (
   miniapp_id text not null references miniapps(id) on delete cascade,
-  path       text not null,              -- 'agent/soul.md', 'src/App.tsx', 'agent/secrets/gmail.json', ...
+  path       text not null,              -- 'agent/agent.md', 'src/App.tsx', 'agent/secrets/gmail.json', ...
   content    text not null,
   updated_at timestamptz not null default now(),
   primary key (miniapp_id, path)
+);
+
+create table if not exists skills (
+  id          text primary key,
+  owner_id    text not null,
+  data        jsonb not null,          -- full SkillRecord (minus files)
+  visibility  text not null default 'private',
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index if not exists skills_owner_idx on skills(owner_id);
+create index if not exists skills_visibility_idx on skills(visibility);
+
+create table if not exists skill_files (
+  skill_id   text not null references skills(id) on delete cascade,
+  path       text not null,              -- 'skill.md', 'tools/send_email.ts', ...
+  content    text not null,
+  updated_at timestamptz not null default now(),
+  primary key (skill_id, path)
 );
 
 create table if not exists runtimes (

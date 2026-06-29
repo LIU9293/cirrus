@@ -30,7 +30,9 @@ import { ROUTES, viewFromPath } from '@/routes'
 import { AgentFlowPage } from '@/pages/AgentFlowPage'
 import { AgentPage } from '@/pages/AgentPage'
 import { CommunityAgentsPage } from '@/pages/CommunityAgentsPage'
+import { NewSkillPage } from '@/pages/NewSkillPage'
 import { RuntimePage } from '@/pages/RuntimePage'
+import { SkillsPage } from '@/pages/SkillsPage'
 import { CardNav, type CardNavItem } from '@/components/CardNav'
 import { MotionAccordion } from '@/components/unlumen-ui/motion-faqs-accordion'
 import DotGrid from '@/components/react-bits/DotGrid'
@@ -73,11 +75,19 @@ export function App() {
 
   const navigate = useCallback((next: NavView, replace = false) => {
     const path = ROUTES[next]
-    if (window.location.pathname !== path) {
+    if (window.location.pathname !== path || window.location.search) {
       const method = replace ? 'replaceState' : 'pushState'
       window.history[method]({}, '', path)
     }
     setView(next)
+  }, [])
+
+  const openSkillDraft = useCallback((draftId: string) => {
+    const path = `${ROUTES.newSkill}?draft=${encodeURIComponent(draftId)}`
+    if (`${window.location.pathname}${window.location.search}` !== path) {
+      window.history.pushState({}, '', path)
+    }
+    setView('newSkill')
   }, [])
 
   useEffect(() => {
@@ -100,7 +110,7 @@ export function App() {
   }, [auth?.user, navigate])
 
   useEffect(() => {
-    if (view !== 'flow') setAgentFlowNav(null)
+    if (view !== 'flow' && view !== 'newSkill') setAgentFlowNav(null)
   }, [view])
 
   const setActiveMiniapp = useCallback((record: MiniappRecord) => {
@@ -143,8 +153,13 @@ export function App() {
       if (existing.length > 0) {
         setActiveMiniapp(await getMiniapp(existing[0].id))
       } else {
-        clearActiveMiniapp()
-        if (window.location.pathname === ROUTES.flow) navigate('agents', true)
+        if (window.location.pathname === ROUTES.flow) {
+          const created = await createMiniapp()
+          setList([{ ...created, hasHtml: !!created.html }])
+          setActiveMiniapp(created)
+        } else {
+          clearActiveMiniapp()
+        }
       }
     })()
   }, [auth?.user, clearActiveMiniapp, navigate, setActiveMiniapp])
@@ -191,10 +206,22 @@ export function App() {
   }, [navigate, setActiveMiniapp])
 
   const newAgent = useCallback(async () => {
-    setActiveMiniapp(await createMiniapp())
+    // Reuse a pristine empty draft if one is lying around (clicking "New agent"
+    // and abandoning it used to pile up "Untitled agent" rows); else create one.
+    const reusable = list.find(
+      (m) =>
+        (m.creationPhase ?? 'define') === 'define' &&
+        !m.manifest &&
+        !m.hasHtml &&
+        !m.draft?.name?.trim() &&
+        !m.draft?.goal?.trim() &&
+        !m.skills?.length &&
+        !m.defineMessages?.length,
+    )
+    setActiveMiniapp(reusable ? await getMiniapp(reusable.id) : await createMiniapp())
     navigate('flow')
     void refreshList()
-  }, [navigate, refreshList, setActiveMiniapp])
+  }, [list, navigate, refreshList, setActiveMiniapp])
 
   const handleDelete = useCallback(
     async (id: string) => {
@@ -455,15 +482,20 @@ export function App() {
     return <LoginScreen devAuth={auth.devAuth} onDevLogin={(user) => setAuth((prev) => ({ user, devAuth: prev?.devAuth ?? false, googleAuth: prev?.googleAuth ?? false }))} />
   }
 
-  // Top-level navigation (URL routes: /agent, /community, /runtime, /new; / redirects to /agent).
+  // Top-level navigation (URL routes: /skills, /agent, /runtime, /new-agent, /new-skill; / redirects to /agent).
   const appNavbar = (
     <AppNavbar
       user={auth.user}
       view={view}
       onNavigate={navigate}
-      centerSlot={view === 'flow' && agentFlowNav ? <AgentFlowNavbarStepper state={agentFlowNav} /> : null}
+      centerSlot={(view === 'flow' || view === 'newSkill') && agentFlowNav ? <AgentFlowNavbarStepper state={agentFlowNav} /> : null}
     />
   )
+  if (view === 'skills') return <>{appNavbar}<SkillsPage agents={list} onNew={() => navigate('newSkill')} onEditDraft={openSkillDraft} /></>
+  if (view === 'newSkill') {
+    const draftId = new URLSearchParams(window.location.search).get('draft')
+    return <>{appNavbar}<NewSkillPage draftId={draftId} onNavigate={navigate} onNavStateChange={setAgentFlowNav} /></>
+  }
   if (view === 'agents') {
     return <>{appNavbar}<AgentPage agents={list} onOpen={openAgent} onNew={newAgent} onRemove={handleDelete} onNavigate={navigate} /></>
   }
@@ -619,13 +651,13 @@ function AppNavbar({
   const items = useMemo<CardNavItem[]>(
     () => [
       {
-        label: 'Agent',
+        label: 'Agents',
         bgColor: '#f3f0ff',
         textColor: '#29215d',
         icon: <AgentNavIllo />,
         links: [
-          { label: 'My Agents', ariaLabel: 'Open My Agents', active: view === 'agents', onClick: () => onNavigate('agents') },
-          { label: 'Community', ariaLabel: 'Open Community Agents', active: view === 'community', onClick: () => onNavigate('community') },
+          { label: 'All Skills', ariaLabel: 'Open Skills', active: view === 'skills', onClick: () => onNavigate('skills') },
+          { label: 'All Agents', ariaLabel: 'Open Agents', active: view === 'agents' || view === 'community', onClick: () => onNavigate('agents') },
         ],
       },
       {

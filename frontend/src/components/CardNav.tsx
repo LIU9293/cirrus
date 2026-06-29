@@ -239,7 +239,7 @@ export function CardNav({
           } md:flex-row md:items-end md:gap-2.5`}
           aria-hidden={!isExpanded}
         >
-          {items.slice(0, 3).map((item, idx) => (
+          {items.map((item, idx) => (
             <div
               key={`${item.label}-${idx}`}
               ref={setCardRef(idx)}

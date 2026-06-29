@@ -4,7 +4,7 @@ import type { MiniappRecord } from '../../shared/protocol.ts'
 // Filesystem-first agent model, now backed by Postgres. The agent folder for a
 // miniapp lives in `miniapp_files` under the `agent/` path prefix:
 //
-//   agent/soul.md             SOUL — what the agent does
+//   agent/agent.md            Agent README — what the agent is and does
 //   agent/skills/<name>.md    SKILLS (per terr_skill_contract.md)
 //   agent/tools/<name>.ts     skill implementations
 //   agent/data/ schedules/ channels/ secrets/   data, triggers, surfaces, credentials
@@ -12,8 +12,9 @@ import type { MiniappRecord } from '../../shared/protocol.ts'
 // Path = identity; reads/writes go through the miniapp_files table.
 
 const SUBDIRS = ['tools', 'skills', 'data', 'schedules', 'channels'] as const
-const SOUL_FILE = 'soul.md'
-const LEGACY_SOUL_FILE = 'instructions.md'
+const AGENT_FILE = 'agent.md'
+const LEGACY_SOUL_FILE = 'soul.md'
+const LEGACY_INSTRUCTIONS_FILE = 'instructions.md'
 const SAFE = /^[A-Za-z0-9._/-]+$/
 
 function agentKey(rel: string): string {
@@ -42,7 +43,9 @@ export async function deleteAgentFile(id: string, rel: string): Promise<void> {
 }
 
 export interface AgentTree {
-  soul: boolean
+  agent: boolean
+  /** @deprecated compatibility with older clients; use `agent`. */
+  soul?: boolean
   tools: string[]
   skills: string[]
   data: string[]
@@ -68,8 +71,10 @@ export async function listAgentTree(id: string): Promise<AgentTree> {
     }
     return [...out]
   }
+  const hasAgentReadme = paths.includes(AGENT_FILE) || paths.includes(LEGACY_SOUL_FILE) || paths.includes(LEGACY_INSTRUCTIONS_FILE)
   return {
-    soul: paths.includes(SOUL_FILE) || paths.includes(LEGACY_SOUL_FILE),
+    agent: hasAgentReadme,
+    soul: hasAgentReadme,
     tools: childrenOf('tools'),
     skills: childrenOf('skills'),
     data: childrenOf('data'),
@@ -78,23 +83,27 @@ export async function listAgentTree(id: string): Promise<AgentTree> {
   }
 }
 
-/** Read the agent's soul (falls back to the legacy instructions.md). */
-export async function readSoul(id: string): Promise<string | null> {
-  return (await readAgentFile(id, SOUL_FILE)) ?? (await readAgentFile(id, LEGACY_SOUL_FILE))
+/** Read the agent README (falls back to legacy soul.md and instructions.md). */
+export async function readAgentReadme(id: string): Promise<string | null> {
+  return (
+    (await readAgentFile(id, AGENT_FILE)) ??
+    (await readAgentFile(id, LEGACY_SOUL_FILE)) ??
+    (await readAgentFile(id, LEGACY_INSTRUCTIONS_FILE))
+  )
 }
 
-/** Seed soul.md from the draft/manifest if it doesn't exist yet (migrating any
- *  legacy instructions.md into soul.md). */
-export async function ensureSoul(record: MiniappRecord): Promise<void> {
-  if ((await readAgentFile(record.id, SOUL_FILE)) != null) return
-  const legacy = await readAgentFile(record.id, LEGACY_SOUL_FILE)
+/** Seed agent.md from the draft/manifest if it doesn't exist yet, migrating
+ *  legacy soul.md or instructions.md into agent.md. */
+export async function ensureAgentReadme(record: MiniappRecord): Promise<void> {
+  if ((await readAgentFile(record.id, AGENT_FILE)) != null) return
+  const legacy = (await readAgentFile(record.id, LEGACY_SOUL_FILE)) ?? (await readAgentFile(record.id, LEGACY_INSTRUCTIONS_FILE))
   if (legacy != null) {
-    await writeAgentFile(record.id, SOUL_FILE, legacy)
+    await writeAgentFile(record.id, AGENT_FILE, legacy)
     return
   }
   const name = record.draft?.name ?? record.manifest?.name ?? 'Agent'
   const goal = record.draft?.goal ?? record.manifest?.description ?? ''
-  await writeAgentFile(record.id, SOUL_FILE, `# ${name}\n\n${goal}\n`)
+  await writeAgentFile(record.id, AGENT_FILE, `# ${name}\n\n${goal}\n`)
 }
 
-export { SUBDIRS, SOUL_FILE }
+export { SUBDIRS, AGENT_FILE }

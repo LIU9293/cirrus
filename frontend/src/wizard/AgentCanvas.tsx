@@ -58,6 +58,7 @@ import type {
   RuntimeAgentModelConfig,
   RuntimeRecord,
   RuntimeStatus,
+  SkillRecord,
   SkillToolCall,
 } from '@shared/protocol'
 import {
@@ -65,6 +66,8 @@ import {
   planSkills as apiPlanSkills,
   analyzeSkill as apiAnalyzeSkill,
   listSkillLibrary,
+  listMySkills,
+  installSkillOnAgent,
   getAgentFile,
   putAgentFile,
   saveSkillCredentials,
@@ -129,10 +132,10 @@ export interface CanvasFlowUpdate {
   defineMessages?: MiniappRecord['defineMessages']
 }
 
-export type NavView = 'flow' | 'agents' | 'runtime' | 'community'
+export type NavView = 'flow' | 'newSkill' | 'skills' | 'agents' | 'runtime' | 'community'
 
 export interface AgentFlowNavState {
-  steps: { key: CreationPhase; label: string }[]
+  steps: { key: string; label: string }[]
   focus: number
   reached: number
   onStep: (index: number) => void
@@ -184,6 +187,9 @@ const PHASES: { key: CreationPhase; label: string }[] = [
   { key: 'surface', label: 'Surface' },
 ]
 
+const AGENT_README_PATH = 'agent.md'
+const LEGACY_AGENT_README_PATHS = ['soul.md', 'instructions.md'] as const
+
 export function AgentCanvas({ miniapp, onUpdateFlow, onNavigate, onNavStateChange, onBuild, buildMessages, building, canvasRef, onState, onLiveSend, liveMessages, liveStreaming, selectingElement, selectedElement, onToggleElementSelect, onElementSelected, onClearSelection }: Props) {
   // A finished ('done') agent — and legacy 'publish' records — land on the last
   // column (Surface) with the full track visible.
@@ -203,7 +209,7 @@ export function AgentCanvas({ miniapp, onUpdateFlow, onNavigate, onNavStateChang
   const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null)
   const [focus, setFocus] = useState(reached)
   // Multiple Edit-Skill panels can be open at once; last in the array renders on top.
-  type PanelTarget = MiniappSkill | 'requirements' | 'soul' | 'miniapp'
+  type PanelTarget = MiniappSkill | 'agentReadme' | 'miniapp'
   type OpenPanel = { target: PanelTarget; origin: DOMRect | null }
   const [panels, setPanels] = useState<OpenPanel[]>([])
   const keyOf = (t: PanelTarget) => (typeof t === 'string' ? t : t.id)
@@ -350,7 +356,7 @@ export function AgentCanvas({ miniapp, onUpdateFlow, onNavigate, onNavStateChang
                   onCreate={(draft) => advance({ draft })}
                 />
               ) : (
-                <RequirementsColumn miniapp={miniapp} onView={(r) => openPanel('requirements', r)} />
+                <AgentReadmeColumn miniapp={miniapp} onView={(r) => openPanel('agentReadme', r)} />
               ))}
             {key === 'skills' && (
               <CapabilitiesColumn
@@ -578,24 +584,43 @@ function DefineChatColumn({
           </button>
         ))}
       </div>
+
+      {!concept && thread.some((m) => m.role === 'user') && !busy && (
+        <button
+          type="button"
+          onClick={() => {
+            const firstUser = thread.find((m) => m.role === 'user')?.content ?? input.trim()
+            if (!firstUser.trim()) return
+            onCreate({ name: agentTitleFromText(firstUser), goal: firstUser.trim() })
+          }}
+          className="self-start text-[12.5px] font-medium text-ink-tertiary underline-offset-2 hover:text-ink hover:underline"
+        >
+          Skip the questions — create the agent now →
+        </button>
+      )}
     </div>
   )
+}
+
+/** Best-effort agent name from the user's first message, for the "create now" escape. */
+function agentTitleFromText(text: string): string {
+  const named = text.match(/\b(?:called|named)\s+([A-Za-z][\w '&-]{2,40})/)
+  const base = named
+    ? named[1].replace(/\s+(that|which|who|to|for|and|with)\b[\s\S]*$/i, '').trim()
+    : text.trim().replace(/^(please\s+)?(create|build|make|an?|the)\s+/i, '').split(/\s+/).slice(0, 4).join(' ')
+  const title = base.trim() || 'New Agent'
+  return title.charAt(0).toUpperCase() + title.slice(1)
 }
 
 function Avatar({ sm }: { sm?: boolean }) {
   return (
-    <div
-      className={cn(
-        'flex shrink-0 items-center justify-center rounded-full bg-ink font-bold text-primary-foreground',
-        sm ? 'size-[26px] text-[11.5px]' : 'size-[30px] text-[13px]',
-      )}
-    >
-      T
+    <div className={cn('flex shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground', sm ? 'size-[26px]' : 'size-[30px]')}>
+      <Sparkles className={sm ? 'size-3.5' : 'size-4'} />
     </div>
   )
 }
 
-/* ───────── Column header (matches "Define Requirements" / "Agent capabilities") ───────── */
+/* ───────── Column header (matches "Define" / "Agent capabilities") ───────── */
 
 function ColHeader({ children }: { children: React.ReactNode }) {
   return <div className="px-1 pb-0.5 text-[13px] font-semibold text-ink-secondary">{children}</div>
@@ -612,24 +637,45 @@ function ViewButton({ onClick }: { onClick?: (rect: DOMRect) => void }) {
   )
 }
 
-/* ──────────────── Define Requirements (compact summary) ──────────────── */
+/* ──────────────── Define · agent.md ──────────────── */
 
-function RequirementsColumn({ miniapp, onView }: { miniapp: MiniappRecord; onView: (rect: DOMRect) => void }) {
+function AgentReadmeColumn({ miniapp, onView }: { miniapp: MiniappRecord; onView: (rect: DOMRect) => void }) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [override, setOverride] = useState<{ name?: string }>({})
   const name = override.name ?? miniapp.draft?.name ?? miniapp.manifest?.name ?? 'Agent'
-  const goal = miniapp.draft?.goal ?? miniapp.manifest?.description ?? ''
+  const [readme, setReadme] = useState('')
+  const preview = readme || defaultAgentReadme(miniapp)
+  useEffect(() => {
+    let alive = true
+    void loadAgentReadme(miniapp.id)
+      .then((content) => {
+        if (alive) setReadme(content)
+      })
+      .catch(() => {
+        if (alive) setReadme('')
+      })
+    return () => {
+      alive = false
+    }
+  }, [miniapp.id])
   return (
     <div className="flex w-[340px] flex-col gap-3">
-      <ColHeader>Define Requirements</ColHeader>
+      <ColHeader>Define</ColHeader>
       <div className="rounded-[16px] border border-border bg-surface shadow-[0_8px_24px_-6px_rgba(25,25,23,0.07)]">
-        <div className="flex flex-col gap-1 p-4 pb-3">
-          <div className="flex items-center gap-1.5">
-            <Sparkles className="size-3.5 text-primary" />
-            <span className="font-mono text-[10.5px] tracking-[0.12em] text-ink-tertiary">AGENT</span>
+        <div className="flex flex-col gap-3 p-4 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="flex size-[30px] items-center justify-center rounded-lg bg-accent-soft text-accent-ink">
+              <Bot className="size-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[14.5px] font-semibold text-ink">{name}</div>
+              <div className="text-[12px] text-ink-tertiary">Agent README</div>
+            </div>
+            <span className="font-mono text-[10.5px] text-ink-tertiary">{AGENT_README_PATH}</span>
           </div>
-          <div className="text-[17px] font-bold tracking-tight text-ink">{name}</div>
-          <div className="text-[13px] leading-relaxed text-ink-secondary">{goal}</div>
+          <pre className="max-h-28 overflow-hidden whitespace-pre-wrap rounded-[11px] bg-white/55 p-3 font-mono text-[12px] leading-relaxed text-ink-secondary">
+            {preview.slice(0, 260)}
+          </pre>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
           <button
@@ -731,6 +777,27 @@ function AgentSettingsDialog({
   )
 }
 
+function defaultAgentReadme(miniapp: MiniappRecord) {
+  const name = miniapp.draft?.name ?? miniapp.manifest?.name ?? 'Agent'
+  const goal = miniapp.draft?.goal ?? miniapp.manifest?.description ?? ''
+  return `# ${name}\n\n${goal}\n`
+}
+
+async function loadAgentReadme(appId: string): Promise<string> {
+  try {
+    return await getAgentFile(appId, AGENT_README_PATH)
+  } catch {
+    for (const path of LEGACY_AGENT_README_PATHS) {
+      try {
+        return await getAgentFile(appId, path)
+      } catch {
+        // Try the next legacy path.
+      }
+    }
+    return ''
+  }
+}
+
 /* ──────────────── Agent capabilities ──────────────── */
 
 const CAT_ICON: Record<string, React.ReactNode> = {
@@ -752,11 +819,10 @@ function CapabilitiesColumn({
   active: boolean
   onSkills: (skills: MiniappSkill[]) => void
   onContinue: () => void
-  onView: (target: MiniappSkill | 'soul', rect: DOMRect) => void
+  onView: (target: MiniappSkill, rect: DOMRect) => void
 }) {
   const [skills, setSkills] = useState<MiniappSkill[]>(miniapp.skills ?? [])
   const [planning, setPlanning] = useState(false)
-  const [soul, setSoul] = useState('')
   const [addOpen, setAddOpen] = useState(false)
   const addSkill = (s: MiniappSkill) => {
     const next = [...skills, s]
@@ -774,7 +840,6 @@ function CapabilitiesColumn({
         })
         .finally(() => setPlanning(false))
     }
-    void getAgentFile(miniapp.id, 'soul.md').then(setSoul).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -783,28 +848,8 @@ function CapabilitiesColumn({
       <div className="flex items-center gap-2 px-1 pb-0.5">
         <span className="text-[13px] font-semibold text-ink-secondary">Agent capabilities</span>
         <span className="rounded-full bg-surface-muted px-1.5 py-0.5 font-mono text-[10.5px] text-ink-tertiary">
-          {planning ? '…' : skills.length + 1}
+          {planning ? '…' : skills.length}
         </span>
-      </div>
-
-      {/* Soul card */}
-      <div className="flex flex-col gap-2.5 rounded-[14px] border border-border bg-surface p-4">
-        <div className="flex items-center gap-2.5">
-          <div className="flex size-[30px] items-center justify-center rounded-lg bg-accent-soft text-accent-ink">
-            <Sparkles className="size-4" />
-          </div>
-          <div className="flex-1">
-            <div className="text-[14.5px] font-semibold text-ink">Soul</div>
-            <div className="text-[12px] text-ink-tertiary">What the agent is &amp; does</div>
-          </div>
-          <span className="font-mono text-[10.5px] text-ink-tertiary">soul.md</span>
-        </div>
-        <pre className="max-h-24 overflow-hidden whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-ink-secondary">
-          {(soul || `# ${miniapp.draft?.name ?? 'Agent'}\n\n${miniapp.draft?.goal ?? ''}`).slice(0, 220)}
-        </pre>
-        <div className="flex justify-end">
-          <ViewButton onClick={(r) => onView('soul', r)} />
-        </div>
       </div>
 
       {planning && (
@@ -848,8 +893,19 @@ function CapabilitiesColumn({
       {addOpen &&
         createPortal(
           <AddSkillsDialog
+            appId={miniapp.id}
             existingPlatformIds={new Set(skills.map((s) => s.platformSkillId).filter(Boolean) as string[])}
+            installedFromSkillIds={new Set(skills.map((s) => s.config?.fromSkillId as string | undefined).filter(Boolean) as string[])}
             onAddSkill={(s) => addSkill(s)}
+            onInstalled={async () => {
+              try {
+                const fresh = await getMiniapp(miniapp.id)
+                setSkills(fresh.skills ?? [])
+                onSkills(fresh.skills ?? [])
+              } catch {
+                /* keep current list if refetch fails */
+              }
+            }}
             onClose={() => setAddOpen(false)}
           />,
           document.body,
@@ -1694,7 +1750,7 @@ function SkillPanel({
 }: {
   appId: string
   miniapp: MiniappRecord
-  target: MiniappSkill | 'requirements' | 'soul' | 'miniapp'
+  target: MiniappSkill | 'agentReadme' | 'miniapp'
   index: number
   origin: DOMRect | null
   onClose: () => void
@@ -1714,10 +1770,9 @@ function SkillPanel({
   onElementSelected?: (sel: CanvasElementSelection) => void
   onClearSelection?: () => void
 }) {
-  const isRequirements = target === 'requirements'
-  const isSoul = target === 'soul'
+  const isAgentReadme = target === 'agentReadme'
   const isMiniApp = target === 'miniapp'
-  const skill = isRequirements || isSoul || isMiniApp ? null : (target as MiniappSkill)
+  const skill = isAgentReadme || isMiniApp ? null : (target as MiniappSkill)
   // Start in Edit (build chat) when there's nothing built yet.
   const [appMode, setAppMode] = useState<'preview' | 'edit'>(isMiniApp && !miniapp.html ? 'edit' : 'preview')
   const tools = skill?.tools ?? []
@@ -1776,11 +1831,11 @@ function SkillPanel({
     window.setTimeout(onClose, 285)
   }
 
-  // README content (soul.md for the soul; description for a skill).
+  // README content (agent.md for the agent; skill.md for a skill).
   const [readme, setReadme] = useState('')
   const [saved, setSaved] = useState(false)
   useEffect(() => {
-    if (isSoul) getAgentFile(appId, 'soul.md').then(setReadme).catch(() => setReadme(''))
+    if (isAgentReadme) loadAgentReadme(appId).then((content) => setReadme(content || defaultAgentReadme(miniapp))).catch(() => setReadme(defaultAgentReadme(miniapp)))
     else if (skill) {
       const slug = skill.name.replace(/[^a-zA-Z0-9_]+/g, '_').toLowerCase().slice(0, 40) || 'skill'
       getAgentFile(appId, `skills/${slug}/skill.md`)
@@ -1899,10 +1954,8 @@ function SkillPanel({
           <div className="flex size-[34px] items-center justify-center rounded-[9px] bg-surface-muted text-ink">
             {isMiniApp ? (
               <AppWindow className="size-[17px]" />
-            ) : isRequirements ? (
-              <Sparkles className="size-[17px]" />
-            ) : isSoul ? (
-              <Sparkles className="size-[17px]" />
+            ) : isAgentReadme ? (
+              <Bot className="size-[17px]" />
             ) : (
               CAT_ICON[skill!.category] ?? <Newspaper className="size-[17px]" />
             )}
@@ -1910,7 +1963,7 @@ function SkillPanel({
           <div className="flex-1">
             <div className="flex items-center gap-2">
               <span className="text-[15.5px] font-bold tracking-tight text-ink">
-                {isMiniApp ? miniapp.manifest?.name ?? 'Mini App' : isRequirements ? 'Define Requirements' : isSoul ? 'Soul' : skill!.name}
+                {isMiniApp ? miniapp.manifest?.name ?? 'Mini App' : isAgentReadme ? AGENT_README_PATH : skill!.name}
               </span>
               {skill && (
                 <span
@@ -1940,7 +1993,7 @@ function SkillPanel({
               )}
             </div>
             <div className="font-mono text-[11px] text-ink-tertiary">
-              {isMiniApp ? 'channels/canvas' : isRequirements ? 'requirements / onboarding' : isSoul ? 'soul.md' : `skills/${skill!.name}`}
+              {isMiniApp ? 'channels/canvas' : isAgentReadme ? AGENT_README_PATH : `skills/${skill!.name}`}
             </div>
           </div>
           {/* Element-select (Edit mode), left of the toggle */}
@@ -2081,15 +2134,13 @@ function SkillPanel({
               )}
             </div>
           </div>
-        ) : isRequirements ? (
-          <RequirementsPanelContent miniapp={miniapp} onUpdateFlow={onUpdateFlow} />
         ) : (
           <div className="flex min-h-0 flex-1">
           {/* Left: collapsible README + tool calls */}
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable]">
             <Collapsible
               title="README"
-              meta={isSoul ? 'soul.md' : 'skill.md'}
+              meta={isAgentReadme ? AGENT_README_PATH : 'skill.md'}
               open={section === 'readme'}
               onToggle={() => setSection((s) => (s === 'readme' ? '' : 'readme'))}
             >
@@ -2102,12 +2153,12 @@ function SkillPanel({
                 rows={5}
                 className="min-h-[120px] w-full resize-y rounded-[9px] border border-border-strong bg-surface p-3 font-mono text-[12px] leading-relaxed text-ink-secondary outline-none focus:border-primary"
               />
-              {(isSoul || skill) && (
+              {(isAgentReadme || skill) && (
                 <div className="mt-2 flex items-center gap-2">
                   <button
                     onClick={() => {
-                      const path = isSoul
-                        ? 'soul.md'
+                      const path = isAgentReadme
+                        ? AGENT_README_PATH
                         : `skills/${skill!.name.replace(/[^a-zA-Z0-9_]+/g, '_').toLowerCase().slice(0, 40) || 'skill'}/skill.md`
                       putAgentFile(appId, path, readme).then(() => setSaved(true)).catch(() => {})
                     }}
@@ -2115,12 +2166,12 @@ function SkillPanel({
                   >
                     <Check className="size-3.5" /> Save
                   </button>
-                  {saved && <span className="text-[11px] text-live">Saved to {isSoul ? 'soul.md' : 'skill.md'}</span>}
+                  {saved && <span className="text-[11px] text-live">Saved to {isAgentReadme ? AGENT_README_PATH : 'skill.md'}</span>}
                 </div>
               )}
             </Collapsible>
 
-            {!isSoul && (
+            {!isAgentReadme && (
               <>
                 <div className="px-1 font-mono text-[10.5px] tracking-[0.12em] text-ink-tertiary">TOOL CALLS · {tools.length}</div>
                 {tools.length === 0 && (
@@ -2217,72 +2268,76 @@ function SkillPanel({
             )}
           </div>
 
-          {/* Draggable column divider */}
-          <div
-            onPointerDown={onSplitDown}
-            className="w-1.5 shrink-0 cursor-col-resize bg-black/5 transition-colors hover:bg-primary/40"
-          />
+          {!isAgentReadme && (
+            <>
+              {/* Draggable column divider */}
+              <div
+                onPointerDown={onSplitDown}
+                className="w-1.5 shrink-0 cursor-col-resize bg-black/5 transition-colors hover:bg-primary/40"
+              />
 
-          {/* Right: AI chat */}
-          <div className="flex min-h-0 min-w-0 shrink-0 flex-col" style={{ width: rightW, maxWidth: 'calc(100% - 120px)' }}>
-            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-              {chat.map((m, i) =>
-                m.role === 'ai' ? (
-                  <div key={i} className="flex items-start gap-2">
-                    <Avatar sm />
-                    <div className="min-w-0 max-w-[92%] rounded-[14px] rounded-bl-[4px] bg-surface-muted px-3 py-2 text-[13px] leading-snug text-ink">
-                      <ErrorBoundary
-                        resetKey={`skill-chat-${i}:${m.text}`}
-                        fallback={(error) => (
-                          <div className="space-y-2">
-                            <div className="rounded-[10px] border border-amber-500/20 bg-amber-500/10 px-2.5 py-2 text-[11.5px] text-amber-700">
-                              Message markdown failed to render: {error.message}
-                            </div>
-                            <pre className="whitespace-pre-wrap break-words font-sans text-[13px] leading-snug text-ink">{m.text}</pre>
-                          </div>
-                        )}
-                      >
-                        <MessageResponse className="overflow-hidden break-words text-[13px] leading-snug">{m.text}</MessageResponse>
-                      </ErrorBoundary>
+              {/* Right: AI chat */}
+              <div className="flex min-h-0 min-w-0 shrink-0 flex-col" style={{ width: rightW, maxWidth: 'calc(100% - 120px)' }}>
+                <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+                  {chat.map((m, i) =>
+                    m.role === 'ai' ? (
+                      <div key={i} className="flex items-start gap-2">
+                        <Avatar sm />
+                        <div className="min-w-0 max-w-[92%] rounded-[14px] rounded-bl-[4px] bg-surface-muted px-3 py-2 text-[13px] leading-snug text-ink">
+                          <ErrorBoundary
+                            resetKey={`skill-chat-${i}:${m.text}`}
+                            fallback={(error) => (
+                              <div className="space-y-2">
+                                <div className="rounded-[10px] border border-amber-500/20 bg-amber-500/10 px-2.5 py-2 text-[11.5px] text-amber-700">
+                                  Message markdown failed to render: {error.message}
+                                </div>
+                                <pre className="whitespace-pre-wrap break-words font-sans text-[13px] leading-snug text-ink">{m.text}</pre>
+                              </div>
+                            )}
+                          >
+                            <MessageResponse className="overflow-hidden break-words text-[13px] leading-snug">{m.text}</MessageResponse>
+                          </ErrorBoundary>
+                        </div>
+                      </div>
+                    ) : (
+                      <div key={i} className="flex justify-end">
+                        <div className="min-w-0 max-w-[92%] whitespace-pre-wrap break-words rounded-[14px] rounded-br-[4px] bg-primary px-3 py-2 text-[13px] leading-snug text-primary-foreground">{m.text}</div>
+                      </div>
+                    ),
+                  )}
+                  {chatBusy && (
+                    <div className="flex items-center gap-2">
+                      <Avatar sm />
+                      <div className="flex items-center gap-1 rounded-[14px] rounded-bl-[4px] bg-surface-muted px-3 py-2.5">
+                        <span className="cirrus-dot size-1.5 rounded-full bg-ink-tertiary" style={{ animationDelay: '0s' }} />
+                        <span className="cirrus-dot size-1.5 rounded-full bg-ink-tertiary" style={{ animationDelay: '0.2s' }} />
+                        <span className="cirrus-dot size-1.5 rounded-full bg-ink-tertiary" style={{ animationDelay: '0.4s' }} />
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <div key={i} className="flex justify-end">
-                    <div className="min-w-0 max-w-[92%] whitespace-pre-wrap break-words rounded-[14px] rounded-br-[4px] bg-primary px-3 py-2 text-[13px] leading-snug text-primary-foreground">{m.text}</div>
-                  </div>
-                ),
-              )}
-              {chatBusy && (
-                <div className="flex items-center gap-2">
-                  <Avatar sm />
-                  <div className="flex items-center gap-1 rounded-[14px] rounded-bl-[4px] bg-surface-muted px-3 py-2.5">
-                    <span className="cirrus-dot size-1.5 rounded-full bg-ink-tertiary" style={{ animationDelay: '0s' }} />
-                    <span className="cirrus-dot size-1.5 rounded-full bg-ink-tertiary" style={{ animationDelay: '0.2s' }} />
-                    <span className="cirrus-dot size-1.5 rounded-full bg-ink-tertiary" style={{ animationDelay: '0.4s' }} />
+                  )}
+                </div>
+                <div className="min-w-0 border-t border-black/5 p-3">
+                  <div className="flex min-w-0 max-w-full items-center gap-2 rounded-full border border-border-strong bg-white/80 py-1.5 pl-3.5 pr-1.5">
+                    <input
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') void sendChat() }}
+                      placeholder="Ask or instruct…"
+                      className="min-w-0 flex-1 overflow-hidden bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-tertiary"
+                    />
+                    <button
+                      onClick={() => void sendChat()}
+                      disabled={chatBusy || !input.trim()}
+                      className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40"
+                      aria-label="Send"
+                    >
+                      <ArrowUp className="size-[15px]" />
+                    </button>
                   </div>
                 </div>
-              )}
-            </div>
-            <div className="min-w-0 border-t border-black/5 p-3">
-              <div className="flex min-w-0 max-w-full items-center gap-2 rounded-full border border-border-strong bg-white/80 py-1.5 pl-3.5 pr-1.5">
-                <input
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') void sendChat() }}
-                  placeholder="Ask or instruct…"
-                  className="min-w-0 flex-1 overflow-hidden bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-tertiary"
-                />
-                <button
-                  onClick={() => void sendChat()}
-                  disabled={chatBusy || !input.trim()}
-                  className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40"
-                  aria-label="Send"
-                >
-                  <ArrowUp className="size-[15px]" />
-                </button>
               </div>
-            </div>
-          </div>
+            </>
+          )}
           </div>
         )}
 
@@ -2464,7 +2519,10 @@ export function MyAgentsPage({
     <div className="dot-bg relative h-full w-full overflow-auto">
       <div className={PAGE_CONTAINER_CLASS}>
         <div className={PAGE_HEADER_CLASS}>
-          <h1 className="text-[28px] font-bold tracking-tight text-ink">My Agents</h1>
+          <div>
+            <h1 className="text-[28px] font-bold tracking-tight text-ink">Agents</h1>
+            <p className="mt-1.5 text-[13.5px] text-ink-secondary">Your agents and community agents in one place.</p>
+          </div>
           <button
             onClick={onNew}
             className="inline-flex w-fit items-center gap-1.5 rounded-[11px] bg-primary px-4 py-2.5 text-[13.5px] font-semibold text-primary-foreground hover:opacity-90"
@@ -2472,37 +2530,52 @@ export function MyAgentsPage({
             <Plus className="size-[15px]" /> New agent
           </button>
         </div>
-        {agents.length === 0 ? (
-          <EmptyAgents onNew={onNew} onBrowseCommunity={() => onNavigate('community')} />
-        ) : (
-          <div className={PAGE_GRID_CLASS}>
-            {agents.map((a) => (
-              <AgentCard key={a.id} agent={a} onClick={() => onOpen(a.id)} onRemove={() => onRemove(a.id)} />
-            ))}
-            <button
-              onClick={onNew}
-              className="flex min-h-[152px] flex-col items-center justify-center gap-2 rounded-[16px] border border-dashed border-border-strong bg-white text-ink-tertiary hover:bg-surface-muted"
-            >
-              <Plus className="size-6" />
-              <span className="text-[13px] font-medium">Create a new agent</span>
-            </button>
+        <section className="mt-7">
+          <div className="flex items-center justify-between">
+            <h2 className="text-[17px] font-bold tracking-tight text-ink">My Agents</h2>
+            <span className="rounded-full bg-surface-muted px-2.5 py-1 text-[11px] font-semibold text-ink-secondary">{agents.length}</span>
           </div>
-        )}
+          {agents.length === 0 ? (
+            <EmptyAgents onNew={onNew} onBrowseCommunity={() => onNavigate('community')} compact />
+          ) : (
+            <div className={PAGE_GRID_CLASS}>
+              {agents.map((a) => (
+                <AgentCard key={a.id} agent={a} onClick={() => onOpen(a.id)} onRemove={() => onRemove(a.id)} />
+              ))}
+              <button
+                onClick={onNew}
+                className="flex min-h-[152px] flex-col items-center justify-center gap-2 rounded-[16px] border border-dashed border-border-strong bg-white text-ink-tertiary hover:bg-surface-muted"
+              >
+                <Plus className="size-6" />
+                <span className="text-[13px] font-medium">Create a new agent</span>
+              </button>
+            </div>
+          )}
+        </section>
+
+        <CommunityAgentsSection onNavigate={onNavigate} />
       </div>
     </div>
   )
 }
 
-function EmptyAgents({ onNew, onBrowseCommunity }: { onNew: () => void; onBrowseCommunity: () => void }) {
+function EmptyAgents({ onNew, onBrowseCommunity, compact = false }: { onNew: () => void; onBrowseCommunity: () => void; compact?: boolean }) {
   return (
-    <div className="mt-7 flex flex-col items-center justify-center gap-5 rounded-[20px] border border-dashed border-border-strong bg-white/40 px-4 py-14 text-center sm:py-20">
-      <div className="relative">
-        <div className="cirrus-float flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-[#837DFF] text-primary-foreground shadow-[0_14px_34px_-10px_rgba(91,87,242,0.55)]">
+    <div className={cn('mt-4 flex flex-col items-center justify-center gap-5 rounded-[20px] border border-dashed border-border-strong bg-white/40 px-4 text-center', compact ? 'py-10 sm:py-12' : 'py-14 sm:py-20')}>
+      {!compact && (
+        <div className="relative">
+          <div className="cirrus-float flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-[#837DFF] text-primary-foreground shadow-[0_14px_34px_-10px_rgba(91,87,242,0.55)]">
+            <Sparkles className="size-7" />
+          </div>
+          <div className="cirrus-float-rev absolute -right-5 -top-3 size-3 rounded-full bg-primary/25" />
+          <div className="cirrus-float-slow absolute -left-6 bottom-0 size-2.5 rounded-full bg-primary/20" />
+        </div>
+      )}
+      {compact && (
+        <div className="flex size-12 items-center justify-center rounded-2xl bg-accent-soft text-accent-ink">
           <Sparkles className="size-7" />
         </div>
-        <div className="cirrus-float-rev absolute -right-5 -top-3 size-3 rounded-full bg-primary/25" />
-        <div className="cirrus-float-slow absolute -left-6 bottom-0 size-2.5 rounded-full bg-primary/20" />
-      </div>
+      )}
       <div>
         <div className="text-[17px] font-bold tracking-tight text-ink">No agents yet — a blank canvas awaits</div>
         <p className="mx-auto mt-1.5 max-w-sm text-[13px] leading-relaxed text-ink-secondary">
@@ -2805,6 +2878,32 @@ const EXPAND_ITEM: Variants = {
 type CommunityItem = { kind: 'hardcoded'; agent: CommunityAgent } | { kind: 'published'; agent: PublishedAgent }
 
 export function CommunityPage({ onNavigate }: { onNavigate: (v: NavView) => void }) {
+  return (
+    <div className="dot-bg relative h-full w-full overflow-auto">
+      <div className={PAGE_CONTAINER_CLASS}>
+        <div>
+          <h1 className="text-[28px] font-bold tracking-tight text-ink">Community Agents</h1>
+          <p className="mt-1.5 text-[13.5px] text-ink-secondary">Agents shared by the community — open one to explore or fork.</p>
+        </div>
+        <CommunityAgentsGrid onNavigate={onNavigate} />
+      </div>
+    </div>
+  )
+}
+
+function CommunityAgentsSection({ onNavigate }: { onNavigate: (v: NavView) => void }) {
+  return (
+    <section className="mt-10">
+      <div>
+        <h2 className="text-[17px] font-bold tracking-tight text-ink">Community Agents</h2>
+        <p className="mt-1.5 text-[13.5px] text-ink-secondary">Shared agents you can add to a runtime.</p>
+      </div>
+      <CommunityAgentsGrid onNavigate={onNavigate} />
+    </section>
+  )
+}
+
+function CommunityAgentsGrid({ onNavigate }: { onNavigate: (v: NavView) => void }) {
   const [usage, setUsage] = useState<Record<string, number>>({})
   const [published, setPublished] = useState<PublishedAgent[]>([])
   useEffect(() => {
@@ -2823,26 +2922,18 @@ export function CommunityPage({ onNavigate }: { onNavigate: (v: NavView) => void
   const cols = lg ? 3 : sm ? 2 : 1
   const columns = Array.from({ length: cols }, (_, c) => items.filter((_, i) => i % cols === c))
   return (
-    <div className="dot-bg relative h-full w-full overflow-auto">
-      <div className={PAGE_CONTAINER_CLASS}>
-        <div>
-          <h1 className="text-[28px] font-bold tracking-tight text-ink">Community Agents</h1>
-          <p className="mt-1.5 text-[13.5px] text-ink-secondary">Agents shared by the community — open one to explore or fork.</p>
+    <div className="mt-6 flex items-start gap-4 sm:mt-7">
+      {columns.map((colItems, ci) => (
+        <div key={ci} className="flex min-w-0 flex-1 flex-col gap-4">
+          {colItems.map((it) =>
+            it.kind === 'hardcoded' ? (
+              <CommunityAgentCard key={'h-' + it.agent.name} agent={it.agent} usedIn={usage[`community:${it.agent.name}`] ?? 0} onNavigate={onNavigate} />
+            ) : (
+              <PublishedAgentCard key={'p-' + it.agent.id} agent={it.agent} onNavigate={onNavigate} />
+            ),
+          )}
         </div>
-        <div className="mt-6 flex items-start gap-4 sm:mt-7">
-          {columns.map((colItems, ci) => (
-            <div key={ci} className="flex min-w-0 flex-1 flex-col gap-4">
-              {colItems.map((it) =>
-                it.kind === 'hardcoded' ? (
-                  <CommunityAgentCard key={'h-' + it.agent.name} agent={it.agent} usedIn={usage[`community:${it.agent.name}`] ?? 0} onNavigate={onNavigate} />
-                ) : (
-                  <PublishedAgentCard key={'p-' + it.agent.id} agent={it.agent} onNavigate={onNavigate} />
-                ),
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
+      ))}
     </div>
   )
 }
@@ -4521,6 +4612,8 @@ function SkillConfigFields({
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState(false) // collapsed by default
   const filledCount = skill.settings.filter((f) => f.filled).length
+  const requiredFields = skill.settings.filter((f) => f.required !== false)
+  const ready = requiredFields.length === 0 || requiredFields.every((f) => f.filled)
 
   const commit = async (key: string, raw: string) => {
     setSavingKey(key)
@@ -4563,6 +4656,9 @@ function SkillConfigFields({
       >
         <ChevronRight className={cn('size-[14px] shrink-0 text-ink-tertiary transition-transform', open && 'rotate-90')} />
         <span className="text-[12px] font-semibold text-ink">{skill.name}</span>
+        <span className={cn('rounded-full px-1.5 py-0.5 text-[9.5px] font-semibold', ready ? 'bg-live-soft text-live' : 'bg-amber-100 text-amber-700')}>
+          {ready ? 'Ready' : 'Needs config'}
+        </span>
         <span className="ml-auto text-[11px] text-ink-tertiary">
           {filledCount > 0 ? `${filledCount}/${skill.settings.length} set` : `${skill.settings.length} settings`}
         </span>
@@ -5536,22 +5632,43 @@ const DESIGN_SKILLS: { pid: string; name: string; desc: string; cat: MiniappSkil
 ]
 
 function AddSkillsDialog({
+  appId,
   existingPlatformIds,
+  installedFromSkillIds,
   onAddSkill,
+  onInstalled,
   onClose,
 }: {
+  appId: string
   existingPlatformIds: Set<string>
+  installedFromSkillIds: Set<string>
   onAddSkill: (s: MiniappSkill) => void
+  onInstalled: () => void | Promise<void>
   onClose: () => void
 }) {
   const [lib, setLib] = useState<PlatformSkill[]>([])
+  const [mine, setMine] = useState<SkillRecord[]>([])
+  const [installingId, setInstallingId] = useState<string | null>(null)
   const [desc, setDesc] = useState('')
   const [analyzing, setAnalyzing] = useState(false)
   const [draft, setDraft] = useState<{ skill: MiniappSkill; summary: string } | null>(null)
   const [analyzeError, setAnalyzeError] = useState('')
   useEffect(() => {
     void listSkillLibrary().then(setLib).catch(() => {})
+    void listMySkills().then(setMine).catch(() => {})
   }, [])
+
+  const installMine = async (skill: SkillRecord) => {
+    if (installingId) return
+    setInstallingId(skill.id)
+    try {
+      await installSkillOnAgent(skill.id, appId)
+      await onInstalled()
+      onClose()
+    } finally {
+      setInstallingId(null)
+    }
+  }
 
   const analyze = async () => {
     const text = desc.trim()
@@ -5599,7 +5716,7 @@ function AddSkillsDialog({
         <div className="flex items-center gap-3 border-b border-border px-5 py-4">
           <div className="flex-1">
             <div className="text-[18px] font-bold tracking-tight text-ink">Add Skills</div>
-            <div className="text-[13px] text-ink-secondary">Extend your agent with a platform skill, or build your own.</div>
+            <div className="text-[13px] text-ink-secondary">Install one of your skills, add a platform skill, or build a new one.</div>
           </div>
           <button
             onClick={onClose}
@@ -5611,6 +5728,44 @@ function AddSkillsDialog({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
+          {mine.length > 0 && (
+            <>
+              <div className="flex flex-col gap-3 p-5">
+                <div className="font-mono text-[10.5px] tracking-[0.13em] text-ink-tertiary">MY SKILLS</div>
+                <div className="grid grid-cols-2 gap-3">
+                  {mine.map((s) => {
+                    const added = installedFromSkillIds.has(s.id)
+                    const installing = installingId === s.id
+                    return (
+                      <button
+                        key={s.id}
+                        disabled={added || installing}
+                        onClick={() => void installMine(s)}
+                        className={cn(
+                          'flex flex-col gap-1.5 rounded-[12px] border border-border p-3 text-left transition',
+                          added ? 'opacity-50' : 'hover:border-border-strong hover:bg-surface-muted',
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="flex size-7 items-center justify-center rounded-[8px] bg-surface-muted text-ink">{CAT_ICON[s.category] ?? <Sparkles className="size-4" />}</div>
+                          <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{s.name}</span>
+                          {added ? (
+                            <span className="text-[10px] font-medium text-ink-tertiary">Added</span>
+                          ) : installing ? (
+                            <Loader2 className="size-3.5 animate-spin text-ink-tertiary" />
+                          ) : (
+                            <span className="flex size-5 items-center justify-center rounded-full bg-accent-soft text-accent-ink"><Plus className="size-3" /></span>
+                          )}
+                        </div>
+                        <div className="line-clamp-2 text-[11px] leading-snug text-ink-tertiary">{s.description || 'No description yet.'}</div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+              <div className="h-px bg-border" />
+            </>
+          )}
           <div className="flex flex-col gap-3 p-5">
             <div className="font-mono text-[10.5px] tracking-[0.13em] text-ink-tertiary">PLATFORM SKILLS</div>
             <div className="grid grid-cols-4 gap-3">

@@ -253,6 +253,58 @@ export interface MiniappSkill {
   config?: Record<string, unknown>
 }
 
+/** Lifecycle of a standalone, reusable skill (distinct from a per-app instance). */
+export type SkillLifecycle =
+  /** Authored but its script tools have no implementation yet. */
+  | 'draft'
+  /** Every script tool has code (README-only skills are 'built' immediately). */
+  | 'built'
+  /** Built and all required settings have a default/value. */
+  | 'configured'
+  /** Published to the community library. */
+  | 'shared'
+
+/** A standalone, reusable skill the user authors and manages (persisted server-
+ *  side, installable onto any agent). The shareable *contract* — concrete values
+ *  for secret settings are bound per agent/runtime, never stored here. */
+export interface SkillRecord {
+  id: string
+  ownerId?: string
+  name: string
+  category: SkillCategory
+  description: string
+  /** skill.md — the instruction the agent reads. */
+  readme: string
+  /** Tool calls this skill exposes (README-only skills have none). */
+  tools: SkillToolCall[]
+  /** Settings/credentials the skill declares (a credential is `secret: true`). */
+  credentials: SkillSetting[]
+  visibility: 'private' | 'public'
+  /** Lifecycle, derived from implementation + settings completeness. */
+  status: SkillLifecycle
+  createdAt: string
+  updatedAt: string
+}
+
+/** One entry in a skill's file tree (skill.md + tools/*.ts). */
+export interface SkillFileNode {
+  path: string
+  kind: 'file' | 'dir'
+}
+
+/** A reusable starting point shown on the Define step (e.g. QQ Mailbox). */
+export interface SkillTemplate {
+  id: string
+  name: string
+  description: string
+  category: SkillCategory
+  readme: string
+  tools: SkillToolCall[]
+  credentials: SkillSetting[]
+  /** Seed file contents keyed by skill-relative path, e.g. "tools/send_email.ts". */
+  files?: Record<string, string>
+}
+
 /** One capability the planner decided the app needs. */
 export interface SkillPlanItem {
   /** The capability in plain words, e.g. "access a vocabulary library". */

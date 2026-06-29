@@ -22,7 +22,29 @@ import { resolveCanvasScreenshot, requestCanvasScreenshot } from './canvasScreen
 import { PLATFORM_SKILLS } from './skills/library.ts'
 import { resolveSkillSettings, writeSkillSettings, settingsFilled, declaredSettings, skillBindingKey, type SkillBindingContext } from './skills/settings.ts'
 import { planAndAttachSkills, developSkill, refineFile, chatAboutSkill, chatAboutSurface, analyzeSkill } from './skills/service.ts'
-import { listAgentTree, readAgentFile, writeAgentFile, ensureSoul } from './agentfs.ts'
+import {
+  loadSkill,
+  listSkills,
+  listPublicSkills,
+  saveSkill,
+  deleteSkill,
+  newSkillId,
+  dedupeName,
+  listSkillFilePaths,
+  readSkillFile,
+  writeSkillFile,
+  computeStatus,
+} from './skills/store.ts'
+import {
+  draftSkill,
+  generateToolScript,
+  refineSkillFile,
+  testSkillScript,
+  installSkillOntoMiniapp,
+  syncSkillFiles,
+  SKILL_TEMPLATES,
+} from './skills/standalone.ts'
+import { listAgentTree, readAgentFile, writeAgentFile, ensureAgentReadme } from './agentfs.ts'
 import { getDatastoreDriver } from './datastore/index.ts'
 import { getSandboxDriver } from './sandbox/index.ts'
 import { createRuntime, deleteRuntime, listRuntimes, listAllRuntimes, loadRuntime, saveRuntime } from './runtimeStore.ts'
@@ -42,6 +64,9 @@ import {
   type RuntimeAgentRef,
   type RuntimeBot,
   type RuntimeRecord,
+  type SkillRecord,
+  type SkillSetting,
+  type SkillToolCall,
 } from '../../shared/protocol.ts'
 
 const app = express()
@@ -62,6 +87,13 @@ async function requireOwnRuntime(req: Request, res: Response, next: NextFunction
   const runtime = await loadRuntime(req.params.id)
   if (!runtime) return res.status(404).json({ error: 'not found' })
   if (runtime.ownerId && req.userId && runtime.ownerId !== req.userId) return res.status(404).json({ error: 'not found' })
+  next()
+}
+async function requireOwnSkill(req: Request, res: Response, next: NextFunction) {
+  const skill = await loadSkill(req.params.id)
+  if (!skill) return res.status(404).json({ error: 'not found' })
+  if (skill.ownerId && req.userId && skill.ownerId !== req.userId) return res.status(404).json({ error: 'not found' })
+  ;(req as Request & { skill?: SkillRecord }).skill = skill
   next()
 }
 
@@ -363,6 +395,12 @@ app.post('/api/miniapps/:id/define/clarify', async (req, res) => {
   const history = (req.body?.history ?? []) as ChatTurn[]
   const context = typeof req.body?.context === 'string' ? req.body.context : ''
   const result = await clarifyConcept(history, context)
+  if (result.ready) {
+    // Auto-dedupe the agent name against the user's other agents: "Mailbox (2)", …
+    const others = (await listRecords(req.userId!)).filter((r) => r.id !== record.id)
+    const taken = others.map((r) => r.draft?.name ?? r.manifest?.name).filter((n): n is string => !!n)
+    result.name = dedupeName(result.name ?? 'Agent', taken)
+  }
   const assistantText = result.ready ? `Got it — ${result.name ?? 'agent'}.` : result.question ?? 'Tell me a bit more?'
   record.defineMessages = [
     ...history.map((m, i) => ({
@@ -387,22 +425,23 @@ app.post('/api/miniapps/:id/define/clarify', async (req, res) => {
 app.get('/api/miniapps/:id/agent/tree', async (req, res) => {
   const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
-  await ensureSoul(record)
-  res.json({ tree: listAgentTree(record.id) })
+  await ensureAgentReadme(record)
+  res.json({ tree: await listAgentTree(record.id) })
 })
 
 app.get('/api/miniapps/:id/agent/file', async (req, res) => {
   const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
   const path = String(req.query.path ?? '')
-  // Soul self-heals: seed it from Define (or migrate legacy instructions.md) on first read.
-  if (path === 'soul.md') await ensureSoul(record)
-  const content = await readAgentFile(record.id, path)
+  // Agent README self-heals from Define or migrates legacy soul.md/instructions.md on first read.
+  if (path === 'agent.md' || path === 'soul.md') await ensureAgentReadme(record)
+  let content = await readAgentFile(record.id, path)
+  if (content == null && path === 'soul.md') content = await readAgentFile(record.id, 'agent.md')
   if (content == null) return res.status(404).json({ error: 'no such file' })
   res.json({ path, content })
 })
 
-// Write/overwrite an agent file directly (e.g. editing instructions.md or a tool).
+// Write/overwrite an agent file directly (e.g. editing agent.md or a tool).
 app.put('/api/miniapps/:id/agent/file', async (req, res) => {
   const record = await loadRecord(req.params.id)
   if (!record) return res.status(404).json({ error: 'not found' })
@@ -485,6 +524,177 @@ app.post('/api/skills/analyze', async (req, res) => {
   if (!description) return res.status(400).json({ error: 'description required' })
   const result = await analyzeSkill(description)
   res.json(result)
+})
+
+// ── Standalone, reusable skills (authored & managed independently of any agent) ──
+// Static sub-paths are registered before the /:id routes so they aren't shadowed.
+
+function sanitizeToolList(input: unknown): SkillToolCall[] {
+  if (!Array.isArray(input)) return []
+  return input
+    .map((t) => {
+      if (!isPlainObject(t)) return null
+      const name = String(t.name ?? '').trim()
+      const description = String(t.description ?? '').trim()
+      if (!name) return null
+      const tool: SkillToolCall = { name, description }
+      if (isPlainObject(t.parameters)) tool.parameters = t.parameters
+      if (typeof t.entry === 'string' && t.entry.trim()) tool.entry = t.entry.trim()
+      return tool
+    })
+    .filter((t): t is SkillToolCall => !!t)
+}
+
+function sanitizeSettingList(input: unknown): SkillSetting[] {
+  if (!Array.isArray(input)) return []
+  return input
+    .map((c) => {
+      if (!isPlainObject(c)) return null
+      const key = String(c.key ?? '').trim()
+      const label = String(c.label ?? '').trim()
+      if (!key || !label) return null
+      const out: SkillSetting = { key, label }
+      if (typeof c.type === 'string') out.type = c.type as SkillSetting['type']
+      if (c.required === false) out.required = false
+      if (c.secret === true) out.secret = true
+      if (c.default != null) out.default = c.default
+      if (typeof c.placeholder === 'string') out.placeholder = c.placeholder
+      if (Array.isArray(c.options)) out.options = c.options as SkillSetting['options']
+      return out
+    })
+    .filter((c): c is SkillSetting => !!c)
+}
+
+// AI draft from a free-text description (name + skill.md + tools + credentials).
+app.post('/api/skills/draft', requireAuth, async (req, res) => {
+  const description = String(req.body?.description ?? '').trim()
+  if (!description) return res.status(400).json({ error: 'description required' })
+  res.json(await draftSkill(description))
+})
+
+// Reusable templates shown on the Define step.
+app.get('/api/skills/templates', requireAuth, (_req, res) => {
+  res.json({ templates: SKILL_TEMPLATES })
+})
+
+// Community (public) standalone skills.
+app.get('/api/skills/community', requireAuth, async (_req, res) => {
+  res.json({ skills: await listPublicSkills() })
+})
+
+// My standalone skills.
+app.get('/api/skills/mine', requireAuth, async (req, res) => {
+  res.json({ skills: await listSkills(req.userId!) })
+})
+
+// Create a skill (seeds skill.md + script files, computes status).
+app.post('/api/skills', requireAuth, async (req, res) => {
+  const body = (req.body ?? {}) as Partial<SkillRecord>
+  const now = new Date().toISOString()
+  // Auto-dedupe the name against the user's existing skills: "QQ Mailbox (2)", …
+  const desiredName = String(body.name ?? '').trim() || 'Untitled skill'
+  const uniqueName = dedupeName(desiredName, (await listSkills(req.userId!)).map((s) => s.name))
+  const record: SkillRecord = {
+    id: newSkillId(),
+    ownerId: req.userId!,
+    name: uniqueName,
+    category: (body.category as SkillRecord['category']) ?? 'tool',
+    description: String(body.description ?? '').trim(),
+    readme: String(body.readme ?? '').trim() || `# ${String(body.name ?? 'Untitled skill').trim()}\n`,
+    tools: sanitizeToolList(body.tools),
+    credentials: sanitizeSettingList(body.credentials),
+    visibility: body.visibility === 'public' ? 'public' : 'private',
+    status: 'draft',
+    createdAt: now,
+    updatedAt: now,
+  }
+  await saveSkill(record, { createIfMissing: true })
+  const synced = (await syncSkillFiles(record.id)) ?? record
+  res.json({ skill: synced })
+})
+
+app.get('/api/skills/:id', requireAuth, requireOwnSkill, async (req, res) => {
+  res.json({ skill: (req as Request & { skill?: SkillRecord }).skill })
+})
+
+app.put('/api/skills/:id', requireAuth, requireOwnSkill, async (req, res) => {
+  const skill = (req as Request & { skill?: SkillRecord }).skill!
+  const body = (req.body ?? {}) as Partial<SkillRecord>
+  if (typeof body.name === 'string') skill.name = body.name.trim() || skill.name
+  if (typeof body.category === 'string') skill.category = body.category as SkillRecord['category']
+  if (typeof body.description === 'string') skill.description = body.description.trim()
+  if (typeof body.readme === 'string') skill.readme = body.readme.trim() || skill.readme
+  if (Array.isArray(body.tools)) skill.tools = sanitizeToolList(body.tools)
+  if (Array.isArray(body.credentials)) skill.credentials = sanitizeSettingList(body.credentials)
+  if (body.visibility === 'public' || body.visibility === 'private') skill.visibility = body.visibility
+  await saveSkill(skill)
+  const synced = (await syncSkillFiles(skill.id)) ?? skill
+  res.json({ skill: synced })
+})
+
+app.delete('/api/skills/:id', requireAuth, requireOwnSkill, async (req, res) => {
+  await deleteSkill(req.params.id)
+  res.json({ ok: true })
+})
+
+// File tree + read/write a single skill file (skill.md, tools/*.ts).
+app.get('/api/skills/:id/files', requireAuth, requireOwnSkill, async (req, res) => {
+  res.json({ paths: await listSkillFilePaths(req.params.id) })
+})
+
+app.get('/api/skills/:id/file', requireAuth, requireOwnSkill, async (req, res) => {
+  const path = String(req.query.path ?? '')
+  const content = await readSkillFile(req.params.id, path)
+  if (content == null) return res.status(404).json({ error: 'no such file' })
+  res.json({ path, content })
+})
+
+app.put('/api/skills/:id/file', requireAuth, requireOwnSkill, async (req, res) => {
+  const skill = (req as Request & { skill?: SkillRecord }).skill!
+  const path = String(req.body?.path ?? '')
+  const content = String(req.body?.content ?? '')
+  if (!path) return res.status(400).json({ error: 'path is required' })
+  await writeSkillFile(skill.id, path, content)
+  if (path === 'skill.md') { skill.readme = content }
+  skill.status = await computeStatus(skill)
+  await saveSkill(skill)
+  res.json({ ok: true, path, status: skill.status })
+})
+
+// Generate a tool's script (AI, with template fallback).
+app.post('/api/skills/:id/tools/:name/generate', requireAuth, requireOwnSkill, async (req, res) => {
+  const skill = (req as Request & { skill?: SkillRecord }).skill!
+  res.json(await generateToolScript(skill, req.params.name, String(req.body?.notes ?? '')))
+})
+
+// AI-refine one skill file from an instruction.
+app.post('/api/skills/:id/file/refine', requireAuth, requireOwnSkill, async (req, res) => {
+  const skill = (req as Request & { skill?: SkillRecord }).skill!
+  const path = String(req.body?.path ?? '')
+  const instruction = String(req.body?.instruction ?? '')
+  if (!path || !instruction) return res.status(400).json({ error: 'path and instruction are required' })
+  const out = await refineSkillFile(skill, path, instruction)
+  skill.status = await computeStatus(skill)
+  await saveSkill(skill)
+  res.json({ ...out, status: skill.status })
+})
+
+// Run a skill script in the sandbox.
+app.post('/api/skills/:id/file/test', requireAuth, requireOwnSkill, async (req, res) => {
+  const skill = (req as Request & { skill?: SkillRecord }).skill!
+  const path = String(req.body?.path ?? '')
+  if (!path) return res.status(400).json({ error: 'path is required' })
+  res.json(await testSkillScript(skill, path, (req.body?.input ?? {}) as Record<string, unknown>))
+})
+
+// Install this skill onto one of the user's agents (miniapps).
+app.post('/api/skills/:id/install', requireAuth, requireOwnSkill, async (req, res) => {
+  const skill = (req as Request & { skill?: SkillRecord }).skill!
+  const miniappId = String(req.body?.miniappId ?? '')
+  const record = await loadRecord(miniappId)
+  if (!record) return res.status(404).json({ error: 'agent not found' })
+  if (record.ownerId && req.userId && record.ownerId !== req.userId) return res.status(404).json({ error: 'agent not found' })
+  res.json(await installSkillOntoMiniapp(skill, record))
 })
 
 // Analyse the app's goal and attach the planned skills (auto-add library matches,

@@ -362,7 +362,7 @@ function SkillsStep({
   const [planned, setPlanned] = useState((miniapp.skills ?? []).length > 0)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [selected, setSelected] = useState<string>('soul')
+  const [selected, setSelected] = useState<string>('agentReadme')
   const [refreshNonce, setRefreshNonce] = useState(0)
 
   const runPlan = async () => {
@@ -433,8 +433,8 @@ function SkillsStep({
   const todo = skills.filter((s) => s.status !== 'active')
   const selectedSkill = skills.find((s) => s.id === selected) ?? null
   const filePath =
-    selected === 'soul'
-      ? 'soul.md'
+    selected === 'agentReadme'
+      ? 'agent.md'
       : selectedSkill?.config?.file
         ? String(selectedSkill.config.file)
         : null
@@ -491,7 +491,7 @@ function SkillsStep({
             onRemove={() => {
               if (selectedSkill) {
                 remove(selectedSkill.id)
-                setSelected('soul')
+                setSelected('agentReadme')
               }
             }}
             onDevelop={(m, input) => selectedSkill && develop(selectedSkill, m, input)}
@@ -551,8 +551,8 @@ function WorkspaceTree({
         </div>
       </div>
       <div className="flex flex-col gap-0.5 p-2">
-        <div className="px-2 pb-1 pt-1 font-mono text-[9px] tracking-widest text-muted-foreground">SOUL</div>
-        <Row id="soul" icon={<Sparkles className="size-3.5" />} label="soul.md" />
+        <div className="px-2 pb-1 pt-1 font-mono text-[9px] tracking-widest text-muted-foreground">AGENT</div>
+        <Row id="agentReadme" icon={<Sparkles className="size-3.5" />} label="agent.md" />
 
         {planning && (
           <div className="flex items-center gap-2 px-2 py-2 text-xs text-muted-foreground">
@@ -645,7 +645,7 @@ function CapabilityDetail({
   onRemove: () => void
   onDevelop: (m: SkillDevelopMethod, input?: Record<string, unknown>) => void
 }) {
-  if (selected === 'soul') return <SoulDetail appId={appId} />
+  if (selected === 'agentReadme') return <AgentReadmeDetail appId={appId} />
   if (selected.startsWith('surface:')) return <SurfaceDetail name={selected.slice(8)} />
   if (!skill) return <div className="p-8 text-sm text-muted-foreground">Select a capability.</div>
 
@@ -714,12 +714,13 @@ function CapabilityDetail({
   )
 }
 
-function SoulDetail({ appId }: { appId: string }) {
+function AgentReadmeDetail({ appId }: { appId: string }) {
   const [text, setText] = useState('')
   const [loaded, setLoaded] = useState(false)
   const [saved, setSaved] = useState(false)
   useEffect(() => {
-    void apiGetAgentFile(appId, 'soul.md')
+    void apiGetAgentFile(appId, 'agent.md')
+      .catch(() => apiGetAgentFile(appId, 'soul.md'))
       .catch(() => apiGetAgentFile(appId, 'instructions.md'))
       .then((c) => {
         setText(c)
@@ -729,7 +730,7 @@ function SoulDetail({ appId }: { appId: string }) {
   }, [appId])
   return (
     <div className="flex min-h-0 flex-col">
-      <DetailHeader icon={<Sparkles className="size-4" />} path="soul.md" badge={<span className="rounded bg-secondary px-2 py-0.5 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">SOUL</span>} />
+      <DetailHeader icon={<Sparkles className="size-4" />} path="agent.md" badge={<span className="rounded bg-secondary px-2 py-0.5 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">AGENT</span>} />
       <div className="flex flex-col gap-3 p-6">
         <div className="text-sm text-muted-foreground">What the agent is and does — seeded from Define, fully editable. The runtime loads it as the agent's system prompt.</div>
         <textarea
@@ -744,7 +745,7 @@ function SoulDetail({ appId }: { appId: string }) {
         />
         <div className="flex items-center gap-3">
           <button
-            onClick={() => apiPutAgentFile(appId, 'soul.md', text).then(() => setSaved(true))}
+            onClick={() => apiPutAgentFile(appId, 'agent.md', text).then(() => setSaved(true))}
             className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
           >
             <Check className="size-4" /> Save
@@ -849,7 +850,7 @@ function RefinePane({ appId, filePath, label, onRefined }: { appId: string; file
           <span className="text-sm font-semibold">Refine with AI</span>
         </div>
         <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-          {filePath ? `edits ${filePath}` : 'select the soul or a skill file to refine'}
+          {filePath ? `edits ${filePath}` : 'select agent.md or a skill file to refine'}
         </div>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
