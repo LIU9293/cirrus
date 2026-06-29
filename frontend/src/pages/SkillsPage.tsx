@@ -78,7 +78,7 @@ export function SkillsPage({
 
   return (
     <div className="dot-bg relative h-full w-full overflow-auto">
-      <div className={PAGE_CONTAINER_CLASS}>
+      <div className={scope === 'mine' ? 'relative z-10 mx-auto w-full max-w-[1080px] px-4 pb-16 pt-9 sm:px-6 sm:pb-20 lg:px-10' : PAGE_CONTAINER_CLASS}>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-[28px] font-bold tracking-tight text-ink">{scope === 'community' ? 'Community Skills' : 'Skills'}</h1>

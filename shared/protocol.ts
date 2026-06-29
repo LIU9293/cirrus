@@ -568,6 +568,9 @@ export interface RuntimeRecord {
   sandboxId: string | null
   sandboxKind: 'e2b' | 'local'
   sandboxError?: string | null
+  /** Selected user connections this runtime runs on (else owner default → platform). */
+  modelConnectionId?: string | null
+  sandboxConnectionId?: string | null
   bots: RuntimeBot[]
   messages: DeveloperChatMessage[]
   createdAt: string

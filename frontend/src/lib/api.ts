@@ -668,6 +668,18 @@ export async function updateRuntimeName(id: string, name: string): Promise<Runti
   return data.runtime
 }
 
+export async function updateRuntimeCompute(id: string, patch: { modelConnectionId?: string | null; sandboxConnectionId?: string | null }): Promise<RuntimeRecord> {
+  const data = await json<{ runtime: RuntimeRecord }>(
+    await fetch(`/api/runtimes/${id}/compute`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(patch),
+    }),
+  )
+  return data.runtime
+}
+
 export async function sendRuntimeChat(
   id: string,
   history: ChatTurn[],

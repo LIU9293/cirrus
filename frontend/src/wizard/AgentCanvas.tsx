@@ -81,6 +81,9 @@ import {
   getRuntime,
   deleteRuntime as apiDeleteRuntime,
   updateRuntimeName,
+  updateRuntimeCompute,
+  listModelConnections,
+  listSandboxConnections,
   streamRuntimeChat,
   submitRuntimeCanvasScreenshotResponse,
   listRuntimeCron,
@@ -2530,7 +2533,7 @@ export function MyAgentsPage({
 }) {
   return (
     <div className="dot-bg relative h-full w-full overflow-auto">
-      <div className={PAGE_CONTAINER_CLASS}>
+      <div className={scope === 'mine' ? 'relative z-10 mx-auto w-full max-w-[1080px] px-4 pb-16 pt-9 sm:px-6 sm:pb-20 lg:px-10' : PAGE_CONTAINER_CLASS}>
         <div className={PAGE_HEADER_CLASS}>
           <div>
             <h1 className="text-[28px] font-bold tracking-tight text-ink">Agents</h1>
@@ -3186,7 +3189,7 @@ export function RuntimesPage({
 
   return (
     <div className="dot-bg relative h-full w-full overflow-auto">
-      <div className={PAGE_CONTAINER_CLASS}>
+      <div className="relative z-10 mx-auto w-full max-w-[1080px] px-4 pb-16 pt-9 sm:px-6 sm:pb-20 lg:px-10">
         <div className={PAGE_HEADER_CLASS}>
           <div>
             <h1 className="text-[28px] font-bold tracking-tight text-ink">Runtimes</h1>
@@ -4336,13 +4339,58 @@ function ConfigurationPanel({ runtimeId, runtime }: { runtimeId: string; runtime
     <div className="flex h-full flex-col gap-7 overflow-auto p-6">
       <div>
         <div className="text-[13px] font-semibold text-ink">Configuration</div>
-        <div className="mt-1 text-[12px] text-ink-tertiary">Credentials &amp; settings for each agent — applied to this runtime only.</div>
+        <div className="mt-1 text-[12px] text-ink-tertiary">Compute and per-agent settings — applied to this runtime only.</div>
       </div>
+      <ComputeSection runtimeId={runtimeId} runtime={runtime} />
       {ownAgents.length === 0 ? (
         <ConfigEmptyState />
       ) : (
         ownAgents.map((a) => <AgentConfigSection key={a.key} runtimeId={runtimeId} agent={a} />)
       )}
+    </div>
+  )
+}
+
+/** Pick which Model / Sandbox connection this runtime runs on (else owner default). */
+function ComputeSection({ runtimeId, runtime }: { runtimeId: string; runtime: RuntimeRecord | null }) {
+  const [models, setModels] = useState<{ id: string; name: string }[]>([])
+  const [sandboxes, setSandboxes] = useState<{ id: string; name: string }[]>([])
+  const [modelId, setModelId] = useState<string>(runtime?.modelConnectionId ?? '')
+  const [sandboxId, setSandboxId] = useState<string>(runtime?.sandboxConnectionId ?? '')
+
+  useEffect(() => {
+    void listModelConnections().then((m) => setModels(m.map((x) => ({ id: x.id, name: x.name })))).catch(() => {})
+    void listSandboxConnections().then((s) => setSandboxes(s.map((x) => ({ id: x.id, name: x.name })))).catch(() => {})
+  }, [])
+
+  const pick = (field: 'modelConnectionId' | 'sandboxConnectionId', value: string) => {
+    if (field === 'modelConnectionId') setModelId(value)
+    else setSandboxId(value)
+    void updateRuntimeCompute(runtimeId, { [field]: value || null }).catch(() => {})
+  }
+
+  const Select = ({ label, value, options, onChange }: { label: string; value: string; options: { id: string; name: string }[]; onChange: (v: string) => void }) => (
+    <label className="flex flex-col gap-1.5">
+      <span className="text-[11.5px] font-semibold text-ink-secondary">{label}</span>
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="h-9 rounded-[9px] border border-border-strong bg-white/80 px-3 text-[13px] text-ink outline-none focus:border-primary">
+        <option value="">Owner default → platform</option>
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+
+  return (
+    <div className="rounded-[12px] border border-border bg-surface p-4">
+      <div className="text-[12.5px] font-semibold text-ink">Compute</div>
+      <div className="mt-0.5 text-[11.5px] text-ink-tertiary">Which model and sandbox this runtime runs on. Manage them in Dashboard → Model / Sandbox.</div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <Select label="Model" value={modelId} options={models} onChange={(v) => pick('modelConnectionId', v)} />
+        <Select label="Sandbox" value={sandboxId} options={sandboxes} onChange={(v) => pick('sandboxConnectionId', v)} />
+      </div>
     </div>
   )
 }

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { config } from './config.ts'
 import { registerAuthRoutes, requireAuth } from './auth/index.ts'
 import { sessionUserId } from './auth/session.ts'
-import { runWithLLM, resolveUserLLM, resolveUserSandbox, invalidateUserLLM } from './agent/llmContext.ts'
+import { runWithLLM, resolveUserCtx, resolveRuntimeCtx, invalidateUserLLM } from './agent/llmContext.ts'
 import {
   listConnections,
   getConnection,
@@ -97,8 +97,8 @@ app.use(async (req, _res, next) => {
   try {
     const uid = sessionUserId(req)
     if (uid) {
-      const [llm, sandbox] = await Promise.all([resolveUserLLM(uid), resolveUserSandbox(uid)])
-      return runWithLLM({ userId: uid, llm, sandbox }, () => next())
+      const c = await resolveUserCtx(uid)
+      return runWithLLM({ userId: uid, llm: c.llm, modelSpec: c.modelSpec, sandbox: c.sandbox }, () => next())
     }
   } catch {
     /* fall through to platform default */
@@ -1061,6 +1061,18 @@ app.get('/api/runtimes/:id', async (req, res) => {
   res.json({ runtime: publicRuntime(await refreshRuntimeStatus(runtime)) })
 })
 
+// Choose which Model / Sandbox connection this runtime runs on (null = inherit
+// the owner's default → platform default).
+app.patch('/api/runtimes/:id/compute', async (req, res) => {
+  const runtime = await loadRuntime(req.params.id)
+  if (!runtime) return res.status(404).json({ error: 'not found' })
+  const body = (req.body ?? {}) as { modelConnectionId?: string | null; sandboxConnectionId?: string | null }
+  if ('modelConnectionId' in body) runtime.modelConnectionId = body.modelConnectionId ?? null
+  if ('sandboxConnectionId' in body) runtime.sandboxConnectionId = body.sandboxConnectionId ?? null
+  await saveRuntime(runtime)
+  res.json({ runtime: publicRuntime(runtime) })
+})
+
 app.post('/api/runtimes/:id/diagnostics/network', async (req, res) => {
   const runtime = await loadRuntime(req.params.id)
   if (!runtime) return res.status(404).json({ error: 'not found' })
@@ -1183,7 +1195,11 @@ app.post('/api/runtimes/:id/chat', async (req, res) => {
   // Streaming chat can ask the runtime window for a live screenshot of the mini
   // app (get_current_snapshot). Non-stream callers (cron/bots/API) get state only.
   const requestScreenshot = wantsStream ? () => requestCanvasScreenshot(runtime.id, emit) : undefined
-  const { message, activities, durationMs, ui, posts } = await executeRuntimeTurn(runtime, history, { persist: true, onStream, requestScreenshot })
+  const rctx = await resolveRuntimeCtx({ ownerId: runtime.ownerId, modelConnectionId: runtime.modelConnectionId, sandboxConnectionId: runtime.sandboxConnectionId })
+  const { message, activities, durationMs, ui, posts } = await runWithLLM(
+    { userId: runtime.ownerId, llm: rctx.llm, modelSpec: rctx.modelSpec, sandbox: rctx.sandbox },
+    () => executeRuntimeTurn(runtime, history, { persist: true, onStream, requestScreenshot }),
+  )
 
   if (wantsStream) {
     for (const activity of activities) emit(activityToEvent(activity))

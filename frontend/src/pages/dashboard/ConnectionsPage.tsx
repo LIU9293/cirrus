@@ -4,7 +4,7 @@ import type { UserConnection } from '@shared/protocol'
 import { createConnection, deleteConnection, listConnections, setDefaultConnection, updateConnection } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
-const PAGE = 'mx-auto w-full max-w-[860px] px-4 pb-16 pt-[100px] sm:px-6'
+const PAGE = 'mx-auto w-full max-w-[860px] px-4 pb-16 pt-9 sm:px-6'
 
 interface FieldDef {
   key: string

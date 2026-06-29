@@ -1,5 +1,6 @@
 import type { AssistantMessage, Model, Usage } from '@earendil-works/pi-ai'
 import { config } from '../config.ts'
+import { currentModelSpec } from './llmContext.ts'
 import type { ActionSpec, DeveloperChatActivity, MiniappRecord } from '../../../shared/protocol.ts'
 import type { ChatTurn } from './developerAgent.ts'
 import { makeRuntimeTools, describeSkills, type RuntimeMessageUi } from './skillTools.ts'
@@ -36,12 +37,15 @@ const EMPTY_USAGE: Usage = {
 }
 
 function makeModel(): Model<'openai-completions'> {
+  // BYO model: use the acting request's resolved model spec (runtime's selected
+  // model → owner default → platform default).
+  const spec = currentModelSpec()
   return {
-    id: config.model,
-    name: config.model,
+    id: spec.model,
+    name: spec.model,
     api: 'openai-completions',
     provider: 'openai',
-    baseUrl: config.baseURL,
+    baseUrl: spec.endpoint,
     reasoning: false,
     input: ['text'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -115,7 +119,7 @@ async function runAgent(
       tools,
       messages: history.slice(0, -1).map((turn, index) => turnToMessage(turn, model, index)),
     },
-    getApiKey: () => config.apiKey,
+    getApiKey: () => currentModelSpec().key,
     toolExecution: 'sequential',
     sessionId: record.id,
     maxRetryDelayMs: 60000,

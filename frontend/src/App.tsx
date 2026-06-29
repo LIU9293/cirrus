@@ -512,13 +512,11 @@ export function App() {
     else if (view === 'dashModel') page = <ModelPage />
     else if (view === 'dashSandbox') page = <SandboxPage />
     else if (view === 'dashSettings') page = <SettingsPage user={auth.user} />
+    // No top navbar inside the dashboard — the sidebar owns the chrome.
     return (
-      <>
-        {appNavbar}
-        <DashboardLayout view={view} onNavigate={navigate}>
-          {page}
-        </DashboardLayout>
-      </>
+      <DashboardLayout user={auth.user} view={view} onNavigate={navigate}>
+        {page}
+      </DashboardLayout>
     )
   }
   // Agent creation/edit flow (view === 'flow')

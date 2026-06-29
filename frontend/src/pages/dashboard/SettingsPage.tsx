@@ -5,7 +5,7 @@ import { logout } from '@/lib/api'
 export function SettingsPage({ user }: { user: AuthUser }) {
   return (
     <div className="dot-bg relative h-full w-full overflow-auto">
-      <div className="mx-auto w-full max-w-[680px] px-4 pb-16 pt-[100px] sm:px-6">
+      <div className="mx-auto w-full max-w-[680px] px-4 pb-16 pt-9 sm:px-6">
         <h1 className="text-[24px] font-bold tracking-tight text-ink">Settings</h1>
         <p className="mt-1 text-[13px] text-ink-secondary">Your profile and account.</p>
 
