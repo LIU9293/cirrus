@@ -36,6 +36,11 @@ export const config = {
   /** Custom E2B template (built by scripts/buildRuntimeTemplate.ts) with all six
    *  community-agent CLIs baked in, so sandboxes start with them present. */
   runtimeSandboxTemplate: process.env.RUNTIME_SANDBOX_TEMPLATE ?? 'cirrus-runtime',
+  /** Public OCI image (runtime-image/Dockerfile) — the single source of truth for
+   *  the runtime environment. Daytona pulls it directly at create; the E2B template
+   *  is built FROM it. Publish to a public registry so users' own sandbox keys (which
+   *  authenticate a different org) can still pull it. */
+  runtimeImage: process.env.RUNTIME_IMAGE ?? 'ghcr.io/cirrus-run/cirrus-runtime:latest',
   port: Number(process.env.PORT ?? 3000),
   // Repo roots, resolved from backend/src.
   repoRoot: resolve(here, '..', '..'),

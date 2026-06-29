@@ -3155,7 +3155,7 @@ export function RuntimesPage({
 
   // Poll active E2B runtimes so badges reflect the real sandbox state.
   const provisioning = runtimes.some((r) => r.status === 'provisioning')
-  const hasE2BRuntime = runtimes.some((r) => r.sandboxKind === 'e2b' && !!r.sandboxId)
+  const hasE2BRuntime = runtimes.some((r) => r.sandboxKind !== 'local' && !!r.sandboxId)
   useEffect(() => {
     if (!provisioning && !hasE2BRuntime) return
     const t = setInterval(() => void refresh(), provisioning ? 1500 : 10000)
@@ -3792,7 +3792,7 @@ function RuntimeWindow({
   // Poll active E2B runtimes so the sandbox badge reflects the real state.
   useEffect(() => {
     const provisioning = runtime?.status === 'provisioning'
-    const hasE2BSandbox = runtime?.sandboxKind === 'e2b' && !!runtime.sandboxId
+    const hasE2BSandbox = runtime?.sandboxKind !== 'local' && !!runtime?.sandboxId
     if (!provisioning && !hasE2BSandbox) return
     const t = setInterval(() => void getRuntime(id).then(setRuntime).catch(() => {}), provisioning ? 1500 : 10000)
     return () => clearInterval(t)
@@ -3981,8 +3981,8 @@ function RuntimeWindow({
               {runtime && <StatusBadge status={runtime.status} />}
             </div>
             <div className="truncate font-mono text-[11px] text-ink-tertiary">
-              {runtime?.sandboxKind === 'e2b' && runtime.sandboxId
-                ? `E2B · ${runtime.sandboxId}`
+              {runtime && runtime.sandboxKind !== 'local' && runtime.sandboxId
+                ? `${runtime.sandboxKind === 'daytona' ? 'Daytona' : 'E2B'} · ${runtime.sandboxId}`
                 : runtime?.status === 'provisioning'
                   ? 'provisioning sandbox…'
                   : 'local sandbox'}
@@ -4219,7 +4219,7 @@ function DetailsPanel({
         <div className="mt-2 rounded-[10px] border border-border bg-surface px-3.5 py-3 text-[12.5px] text-ink-secondary">
           <div className="flex items-center justify-between">
             <span>Backend</span>
-            <span className="font-semibold text-ink">{runtime?.sandboxKind === 'e2b' ? 'E2B' : 'Local'}</span>
+            <span className="font-semibold text-ink">{runtime?.sandboxKind === 'daytona' ? 'Daytona' : runtime?.sandboxKind === 'e2b' ? 'E2B' : 'Local'}</span>
           </div>
           <div className="mt-2 flex items-center justify-between">
             <span>Status</span>

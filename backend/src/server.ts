@@ -1043,7 +1043,7 @@ function publicRuntime(rt: RuntimeRecord): RuntimeRecord {
 }
 
 async function refreshRuntimeStatus(runtime: RuntimeRecord): Promise<RuntimeRecord> {
-  if (runtime.sandboxKind !== 'e2b' || !runtime.sandboxId) return runtime
+  if (runtime.sandboxKind === 'local' || !runtime.sandboxId) return runtime
   const result = await getRuntimeSandboxStatus(runtime.sandboxId)
   if (runtime.status === result.status && (runtime.sandboxError ?? null) === (result.error ?? null)) return runtime
   const next = { ...runtime, status: result.status, sandboxError: result.error ?? null }
@@ -1078,7 +1078,7 @@ app.post('/api/runtimes/:id/diagnostics/network', async (req, res) => {
   const runtime = await loadRuntime(req.params.id)
   if (!runtime) return res.status(404).json({ error: 'not found' })
   const result = await diagnoseRuntimeNetwork(runtime)
-  if (!result.ok && result.error === 'Runtime is not backed by an E2B sandbox.') return res.status(400).json({ ...result, runtime: publicRuntime(runtime) })
+  if (!result.ok && result.error === 'Runtime is not backed by a sandbox.') return res.status(400).json({ ...result, runtime: publicRuntime(runtime) })
   res.json(result)
 })
 
@@ -1087,7 +1087,7 @@ app.post('/api/runtimes/:id/diagnostics/gmail', async (req, res) => {
   if (!runtime) return res.status(404).json({ error: 'not found' })
   const miniappId = typeof req.body?.miniappId === 'string' ? req.body.miniappId : ''
   const result = await diagnoseRuntimeGmail(runtime, miniappId)
-  if (!result.ok && result.error === 'Runtime is not backed by an E2B sandbox.') return res.status(400).json({ ...result, runtime: publicRuntime(runtime) })
+  if (!result.ok && result.error === 'Runtime is not backed by a sandbox.') return res.status(400).json({ ...result, runtime: publicRuntime(runtime) })
   if (!result.ok && result.error === 'Miniapp agent not found.') return res.status(404).json(result)
   res.json(result)
 })
@@ -1125,9 +1125,9 @@ app.post('/api/runtimes', async (req, res) => {
       fresh.sandboxKind = result.kind
       fresh.sandboxId = result.sandboxId
       fresh.sandboxError = result.error ?? null
-      fresh.status = result.kind === 'e2b' ? 'running' : 'local'
+      fresh.status = result.kind === 'local' ? 'local' : 'running'
       await saveRuntime(fresh)
-      if (fresh.sandboxKind === 'e2b' && fresh.sandboxId) void installRuntimeCommunityAgents(fresh).catch(async (err) => {
+      if (fresh.sandboxKind !== 'local' && fresh.sandboxId) void installRuntimeCommunityAgents(fresh).catch(async (err) => {
         const latest = await loadRuntime(fresh.id)
         if (!latest) return
         latest.sandboxError = String((err as Error)?.message ?? err)
@@ -1308,7 +1308,7 @@ app.post('/api/runtimes/:id/agents', async (req, res) => {
   if (!runtime.agents.some((a) => a.key === agent.key)) {
     runtime.agents.push(normalizeRuntimeAgentRef(agent))
     await saveRuntime(runtime)
-    if (runtime.sandboxKind === 'e2b' && runtime.sandboxId) await installRuntimeCommunityAgents(runtime).catch(() => runtime)
+    if (runtime.sandboxKind !== 'local' && runtime.sandboxId) await installRuntimeCommunityAgents(runtime).catch(() => runtime)
   }
   res.json({ runtime: publicRuntime(runtime) })
 })

@@ -12,6 +12,7 @@
     "verify:runtime-digest": "node --import tsx src/scripts/verifyRuntimeDigest.ts"
   },
   "dependencies": {
+    "@daytonaio/sdk": "^0.192.0",
     "@e2b/code-interpreter": "^2.6.1",
     "@earendil-works/pi-agent-core": "^0.79.6",
     "cors": "^2.8.5",

@@ -19,7 +19,7 @@ type Activities = NonNullable<DeveloperChatMessage['activities']>
 /** Lazily install any community agents into the runtime's E2B sandbox. Moved here
  *  so both the HTTP chat endpoint and the scheduler can reuse it. */
 export async function installRuntimeCommunityAgents(runtime: RuntimeRecord): Promise<RuntimeRecord> {
-  if (runtime.sandboxKind !== 'e2b' || !runtime.sandboxId) return runtime
+  if (runtime.sandboxKind === 'local' || !runtime.sandboxId) return runtime
   let changed = false
   const originalAgents = runtime.agents.map(normalizeRuntimeAgentRef)
   const agents: RuntimeAgentRef[] = []
@@ -94,7 +94,7 @@ export async function executeRuntimeTurn(
   const startedAt = Date.now()
 
   if (
-    runtime.sandboxKind === 'e2b' &&
+    runtime.sandboxKind !== 'local' &&
     runtime.sandboxId &&
     runtime.agents.some(communityAgentNeedsInstall)
   ) {
@@ -121,7 +121,7 @@ export async function executeRuntimeTurn(
 
   const selectedAgent = route.targetAgentKey ? runtime.agents.find((agent) => agent.key === route.targetAgentKey) : null
   const selectedRecord = selectedAgent?.source === 'own' && selectedAgent.miniappId ? ownRecordsByMiniappId.get(selectedAgent.miniappId) : null
-  const sandboxId = runtime.sandboxKind === 'e2b' ? runtime.sandboxId : null
+  const sandboxId = runtime.sandboxKind !== 'local' ? runtime.sandboxId : null
 
   let message: string
   let activities: Activities = []

@@ -566,9 +566,9 @@ export interface RuntimeRecord {
   name: string
   agents: RuntimeAgentRef[]
   status: RuntimeStatus
-  /** E2B sandbox id when running, else null. */
+  /** Persistent sandbox id when running, else null. */
   sandboxId: string | null
-  sandboxKind: 'e2b' | 'local'
+  sandboxKind: 'e2b' | 'daytona' | 'local'
   sandboxError?: string | null
   /** Selected user connections this runtime runs on (else owner default → platform). */
   modelConnectionId?: string | null

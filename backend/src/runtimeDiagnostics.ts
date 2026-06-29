@@ -29,8 +29,8 @@ function parseSandboxJson(stdout: string): unknown {
 }
 
 function runtimeSandbox(runtime: RuntimeRecord): { ok: true; sandboxId: string } | { ok: false; error: string } {
-  if (runtime.sandboxKind !== 'e2b' || !runtime.sandboxId) {
-    return { ok: false, error: 'Runtime is not backed by an E2B sandbox.' }
+  if (runtime.sandboxKind === 'local' || !runtime.sandboxId) {
+    return { ok: false, error: 'Runtime is not backed by a sandbox.' }
   }
   return { ok: true, sandboxId: runtime.sandboxId }
 }
