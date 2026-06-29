@@ -1,29 +1,60 @@
-// Registers the public Cirrus runtime image (runtime-image/Dockerfile) as an E2B
-// template, so E2B runtimes start with all six community-agent CLIs present.
+// Builds the custom E2B template used by E2B runtimes, with all six community-agent
+// CLIs baked in so sandboxes start with them present (zero per-install wait).
 //
-// The image is the single source of truth (see runtime-image/Dockerfile). Daytona
-// pulls it directly; E2B needs it wrapped as a template — that's all this does now.
+//   E2B_API_KEY=... node --import tsx src/scripts/buildRuntimeTemplate.ts
 //
-//   1. Build & push the public image first:
-//        docker build -t ghcr.io/liu9293/cirrus-runtime:latest backend/runtime-image
-//        docker push  ghcr.io/liu9293/cirrus-runtime:latest
-//   2. Then register it as the E2B template:
-//        E2B_API_KEY=... node --import tsx src/scripts/buildRuntimeTemplate.ts
+// On success it prints the built template name/id — wire that into
+// RUNTIME_SANDBOX_TEMPLATE (config.ts default is already `cirrus-runtime`).
 //
-// On success it prints the template name/id — wire that into RUNTIME_SANDBOX_TEMPLATE
-// (config.ts default is already `cirrus-runtime`).
+// WHY NOT `.fromImage(config.runtimeImage)` (the public runtime image)?
+//   We tried it. `fromImage` produces a sandbox WITHOUT E2B's code-interpreter
+//   (envd/Jupyter) start command, so `runCode` — which the runtime sandbox uses to
+//   execute JS — fails with "port not open". Building `.fromTemplate('code-
+//   interpreter-v1')` inherits that start command, so runCode works. So the public
+//   image is the source of truth for DAYTONA (it pulls it directly); E2B mirrors the
+//   same CLI install steps on top of code-interpreter-v1 here. Keep the two CLI lists
+//   (this file + runtime-image/Dockerfile) in sync.
 import { Template, defaultBuildLogger } from 'e2b'
 import { config } from '../config.ts'
 
 export const RUNTIME_TEMPLATE_NAME = 'cirrus-runtime'
 
+// Reliable npm-published CLIs install as one step (fail the build if broken).
+const NPM_CLIS = 'opencode-ai @anthropic-ai/claude-code @openai/codex @mariozechner/pi-coding-agent'
+
+// Hermes runs with --skip-setup so it stays in its own uv venv and skips the
+// interactive gateway/browser stages. Best-effort: a failure only warns.
+const HERMES_INSTALL = 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o /tmp/h.sh && bash /tmp/h.sh --skip-setup < /dev/null || echo "[warn] hermes install failed"'
+// OpenClaw needs Node 24; its installer upgrades system Node via NodeSource, which
+// breaks the code-interpreter base's Jupyter. Install Node 24 into an isolated
+// prefix (/opt/node24, tarball — no apt, system Node 20 stays for Jupyter), install
+// OpenClaw there, and expose a PATH wrapper that runs it with Node 24.
+const OPENCLAW_INSTALL = [
+  'ARCH=$(uname -m); case "$ARCH" in aarch64) NA=arm64;; *) NA=x64;; esac',
+  'curl -fsSL https://nodejs.org/dist/v24.17.0/node-v24.17.0-linux-$NA.tar.xz -o /tmp/n24.tar.xz',
+  'mkdir -p /opt/node24 && tar -xJf /tmp/n24.tar.xz -C /opt/node24 --strip-components=1',
+  // Run npm WITH node24 on PATH so it installs into /opt/node24 (its own prefix).
+  'env PATH=/opt/node24/bin:$PATH /opt/node24/bin/npm install -g openclaw@latest',
+  `printf '%s\\n' '#!/bin/bash' 'exec env PATH=/opt/node24/bin:$PATH /opt/node24/bin/openclaw "$@"' > /usr/local/bin/openclaw`,
+  'chmod +x /usr/local/bin/openclaw',
+].join(' && ') + ' || echo "[warn] openclaw install failed"'
+
 async function main() {
   if (!process.env.E2B_API_KEY) throw new Error('E2B_API_KEY is required to build a template.')
 
-  // Build the E2B template straight from the public image — no per-CLI install
-  // steps here anymore; they live in runtime-image/Dockerfile (one source of truth).
-  // For a private registry, pass { username, password } as the second arg.
-  const template = Template().fromImage(config.runtimeImage)
+  // Installs run as root: the build's default user is `user`, which can't write
+  // to /usr/lib/node_modules for `npm install -g`.
+  const asRoot = { user: 'root' }
+  const template = Template()
+    .fromTemplate('code-interpreter-v1')
+    .runCmd(`npm install -g ${NPM_CLIS}`, asRoot)
+    // Pi has no built-in MCP; bake the MCP client extension so the pi driver can
+    // bridge platform tools (installs into the runtime user's ~/.pi).
+    .runCmd('pi install npm:pi-mcp-extension || echo "[warn] pi-mcp-extension install failed"', asRoot)
+    .runCmd(HERMES_INSTALL, asRoot)
+    .runCmd(OPENCLAW_INSTALL, asRoot)
+    // Record what we baked in for debugging from inside the sandbox.
+    .runCmd('for b in opencode claude codex pi hermes openclaw; do printf "%s: %s\\n" "$b" "$(command -v "$b" || echo MISSING)"; done > /home/user/.cirrus-clis.txt || true', asRoot)
 
   const info = await Template.build(template, RUNTIME_TEMPLATE_NAME, {
     apiKey: process.env.E2B_API_KEY,
@@ -33,8 +64,9 @@ async function main() {
     onBuildLogs: defaultBuildLogger({ minLevel: 'info' }),
   })
 
-  console.log('\n✅ Template built from', config.runtimeImage, '→', JSON.stringify(info, null, 2))
+  console.log('\n✅ Template built:', JSON.stringify(info, null, 2))
   console.log(`\nNext: set RUNTIME_SANDBOX_TEMPLATE="${info.name ?? RUNTIME_TEMPLATE_NAME}" (default already wired in config).`)
+  console.log('platform model (for reference):', config.model)
 }
 
 main().catch((err) => {

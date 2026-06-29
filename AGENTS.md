@@ -113,8 +113,14 @@ org) that can't see it. A public image is the portable unit both providers pull
 regardless of whose key is used:
 
 - **Daytona** — `create({ image: runtimeImage })` pulls it directly at create.
-- **E2B** — the template is built FROM it (`Template.fromImage`, see
-  `scripts/buildRuntimeTemplate.ts`); referenced by name as `runtimeSandboxTemplate`.
+  Verified: cold first-pull is one-time per org (~minutes for the 3.4 GB image),
+  steady-state create is ~1–2 s with all six CLIs present.
+- **E2B** — does **not** consume the image. `Template().fromImage()` drops E2B's
+  code-interpreter (Jupyter) start command, so `runCode` breaks ("port not open").
+  E2B builds its template from `code-interpreter-v1` and mirrors the same CLI
+  installs (`scripts/buildRuntimeTemplate.ts`), referenced as `runtimeSandboxTemplate`.
+  Keep the two CLI lists (Dockerfile + that script) in sync. Verified: building the
+  template takes ~2.5 min, then create is ~1.5–4 s.
 
 `sandbox/runtimeSandbox.ts` is provider-agnostic: `resolveTarget()` picks provider
 + key from the request's BYO sandbox → platform E2B env, and provision / run /

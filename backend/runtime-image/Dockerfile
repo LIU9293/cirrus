@@ -9,8 +9,11 @@
 #   that can't see our private template. A public OCI image is the portable unit
 #   both providers can pull regardless of whose key is used:
 #     • Daytona — `create({ image })` pulls this image directly at sandbox create.
-#     • E2B     — `Template().fromImage(<this image>)` builds the template FROM it
-#                 (see scripts/buildRuntimeTemplate.ts).
+#     • E2B     — does NOT consume this image. Building a template via
+#                 `Template().fromImage()` drops E2B's code-interpreter (Jupyter)
+#                 start command, so `runCode` breaks. E2B instead builds from
+#                 `code-interpreter-v1` and mirrors the SAME CLI install steps
+#                 (scripts/buildRuntimeTemplate.ts) — keep the two CLI lists in sync.
 #
 # Base on the E2B code-interpreter image so E2B's envd/Jupyter `runCode` keeps
 # working; it also carries a system Node that Daytona's `codeRun` uses.
