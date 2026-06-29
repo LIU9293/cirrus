@@ -103,6 +103,30 @@ Implementation implications:
 - A user's model must support tool/function-calling for skill planning and tool
   use; surface this requirement in the Model page.
 
+### Runtime Image (portable sandbox environment)
+
+The runtime environment (the six community-agent CLIs) is a **single public OCI
+image** — `backend/runtime-image/Dockerfile`, `config.runtimeImage`. This is the
+one source of truth, because a custom E2B template / Daytona snapshot is private
+to the org that built it, but users bring their **own** sandbox keys (a different
+org) that can't see it. A public image is the portable unit both providers pull
+regardless of whose key is used:
+
+- **Daytona** — `create({ image: runtimeImage })` pulls it directly at create.
+- **E2B** — the template is built FROM it (`Template.fromImage`, see
+  `scripts/buildRuntimeTemplate.ts`); referenced by name as `runtimeSandboxTemplate`.
+
+`sandbox/runtimeSandbox.ts` is provider-agnostic: `resolveTarget()` picks provider
++ key from the request's BYO sandbox → platform E2B env, and provision / run /
+status / kill dispatch by provider. `sandboxKind` is `e2b | daytona | local`;
+non-`local` means "real sandbox."
+
+> **Known follow-up:** a runtime is provisioned with whatever sandbox the request
+> resolved (owner default at create time). If a user later points the runtime at a
+> *different* sandbox connection via the compute PATCH, the existing persistent
+> sandbox is **not** re-provisioned — changing a runtime's sandbox should kill the
+> old sandbox and provision a new one (then reinstall agents).
+
 ### Build Order
 
 1. Dashboard shell + IA split (move "My skills/agents" off the community pages)
