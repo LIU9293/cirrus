@@ -248,7 +248,7 @@ export function NewSkillPage({
     setSaving(true)
     const id = await ensureSkill()
     setSaving(false)
-    if (id) onNavigate('skills')
+    if (id) onNavigate('dashSkills')
   }
 
   return (

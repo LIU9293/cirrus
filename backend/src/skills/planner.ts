@@ -1,5 +1,5 @@
 import type { OpenAI } from 'openai'
-import { openai } from '../agent/client.ts'
+import { openai, llmModel } from '../agent/client.ts'
 import { config } from '../config.ts'
 import type {
   SkillCategory,
@@ -162,7 +162,7 @@ export async function planSkills(goal: string, name?: string): Promise<SkillPlan
 
   try {
     const completion = await openai.chat.completions.create({
-      model: config.model,
+      model: llmModel(),
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },

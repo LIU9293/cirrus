@@ -1,4 +1,4 @@
-import { openai } from '../agent/client.ts'
+import { openai, llmModel } from '../agent/client.ts'
 import { config } from '../config.ts'
 import { readAgentFile } from '../agentfs.ts'
 import { getSandboxDriver } from '../sandbox/index.ts'
@@ -61,7 +61,7 @@ async function classify(emails: Email[]): Promise<Email[]> {
   try {
     const items = todo.map((e, i) => `${i}. from=${e.from} | subject=${e.subject} | snippet=${e.snippet ?? ''}`).join('\n')
     const c = await openai.chat.completions.create({
-      model: config.model,
+      model: llmModel(),
       messages: [
         {
           role: 'system',
@@ -161,7 +161,7 @@ export async function runInboxTriage(record: MiniappRecord, opts: { sandboxId?: 
   let summary = ''
   try {
     const c = await openai.chat.completions.create({
-      model: config.model,
+      model: llmModel(),
       messages: [
         { role: 'system', content: '用一两句中文总结这次邮箱扫描：强调重要邮件数量，并给一句清理建议。' },
         { role: 'user', content: `共扫描 ${total} 封邮件（来源：${mode === 'mock' ? '演示数据' : mode === 'e2b' ? 'E2B 内的真实 Gmail' : '真实 Gmail'}），分类统计：${JSON.stringify(byCategory)}` },

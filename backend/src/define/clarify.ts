@@ -1,5 +1,5 @@
 import type { OpenAI } from 'openai'
-import { openai } from '../agent/client.ts'
+import { openai, llmModel } from '../agent/client.ts'
 import { config } from '../config.ts'
 import type { ChatTurn } from '../agent/developerAgent.ts'
 import { developerSkillPrompt } from '../agent/developerSkills.ts'
@@ -67,7 +67,7 @@ export async function clarifyConcept(history: ChatTurn[], context = ''): Promise
 
   try {
     const c = await openai.chat.completions.create({
-      model: config.model,
+      model: llmModel(),
       messages,
       tools: [respondTool],
       tool_choice: { type: 'function', function: { name: 'respond' } },

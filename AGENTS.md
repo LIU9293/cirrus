@@ -23,6 +23,95 @@ longer the center of the product. Do not over-optimize new work around miniapp
 generation unless the task explicitly asks for it. Prefer changes that improve
 the Skill and Agent management model.
 
+## Platform Positioning (Open Control Plane)
+
+The platform is an **open control plane for skills and agents**: it manages,
+connects, and orchestrates — it does not have to own the compute. By default a
+user can **bring their own model** (LLM endpoint + key) and **their own sandbox**
+(E2B / Daytona / …) and run everything on their own backends. The platform's
+value is management, composition, a community registry, and orchestration — a
+**manager + connector**, not the runtime owner.
+
+Hosted model and hosted sandbox are an optional, paid convenience tier offered
+later, never a requirement. Therefore: design every compute-touching feature so
+it resolves the **acting user's** configuration first and treats the platform's
+own model/sandbox as a fallback default.
+
+## Information Architecture
+
+There are two surfaces.
+
+**Community (discovery)** — `/skills` and `/agents` show ONLY public / shared
+skills and agents. They are a registry, not a workspace: browse is open (login
+optional), installing or forking into a workspace requires login. A user's own
+skills/agents must NOT appear here.
+
+**Dashboard (the user's workspace)** — everything the user owns, under
+`/dashboard/*`:
+
+- **Skills** — the user's authored skills.
+- **Agents** — the user's agents.
+- **Bots** — reusable bot connectors (Telegram/Discord/…).
+- **Runtimes** — running homes that compose agents + a model + a sandbox + bots.
+- **Model** — the user's LLM connection configs.
+- **Sandbox** — the user's sandbox/compute connection configs.
+- **Settings** — profile, avatar, account.
+
+### Connection Resources (Model, Sandbox, Bot)
+
+Model, Sandbox, and Bot are **user-level, reusable connection resources**. Each
+holds a secret the platform stores but never returns to the client.
+
+- **Model config** — `{ name, endpoint, apiKey (secret), model }`. A user may have
+  **several**; one is the **default** (used for studio/authoring LLM calls that
+  are not tied to a runtime — clarify, plan, draft, refine, skill chat).
+- **Sandbox config** — `{ name, provider (e2b | daytona | …), apiKey (secret), … }`.
+  Same shape: several allowed, one default (used for studio testing).
+- **Bot** — `{ name, platform, token (secret) }`. Created in the dashboard and
+  **attached** to a runtime (pick from your bots, do not paste tokens inline).
+  A bot binds to **at most one active runtime** at a time (single-consumer
+  long-poll reality).
+
+### Runtime Composition
+
+A **Runtime** composes: selected agents + one Model config + one Sandbox config +
+zero or more attached Bots. Each runtime may select **different** model/sandbox
+configs; if none is selected it inherits the user's default, and if the user has
+none it falls back to the platform default. Triggers (cron) and channels (bots)
+stay runtime-level — they are not skills.
+
+## Bring-Your-Own Compute — resolution order
+
+Wherever the platform calls an LLM or a sandbox, resolve in this order:
+
+1. The **runtime's selected** config (for runtime operations), or the **user's
+   default** config (for studio/authoring operations).
+2. The **platform default** model/sandbox — a shared, rate-limited fallback so a
+   new user can start with nothing configured.
+3. (Future) a paid hosted tier.
+
+Implementation implications:
+
+- There is no single global LLM client for user-facing work. Server code resolves
+  a per-user / per-runtime client+model through a resolver (e.g. `llmFor(userId)`
+  / `llmForRuntime(runtime)`), threaded through every call site. The current
+  global `backend/src/agent/client.ts` becomes the platform-default fallback only.
+- The sandbox driver is likewise resolved per user/runtime (add a Daytona driver
+  alongside the existing e2b/local drivers).
+- User model/sandbox/bot keys are secrets: store in a user-scoped secret store,
+  never return raw values, mask in the UI.
+- A user's model must support tool/function-calling for skill planning and tool
+  use; surface this requirement in the Model page.
+
+### Build Order
+
+1. Dashboard shell + IA split (move "My skills/agents" off the community pages)
+   and a user-scoped settings/secret store.
+2. Model (BYO LLM) configs + the `llmFor` resolver threaded through call sites.
+3. Sandbox configs (E2B now; add a Daytona driver) selectable per runtime.
+4. Bots as a dashboard resource, attachable to a runtime.
+5. Community publish / fork polish.
+
 ## Core Definitions
 
 ### Agent

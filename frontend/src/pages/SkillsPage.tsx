@@ -46,10 +46,12 @@ export function SkillsPage({
   agents,
   onNew,
   onEditDraft,
+  scope = 'mine',
 }: {
   agents: MiniappRecord[]
   onNew?: () => void
   onEditDraft?: (draftId: string) => void
+  scope?: 'mine' | 'community'
 }) {
   const [mine, setMine] = useState<SkillRecord[]>([])
   const [community, setCommunity] = useState<SkillRecord[]>([])
@@ -79,42 +81,48 @@ export function SkillsPage({
       <div className={PAGE_CONTAINER_CLASS}>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-[28px] font-bold tracking-tight text-ink">Skills</h1>
+            <h1 className="text-[28px] font-bold tracking-tight text-ink">{scope === 'community' ? 'Community Skills' : 'Skills'}</h1>
             <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-secondary">
-              Author reusable skills, install them on your agents, and share them with the community.
+              {scope === 'community'
+                ? 'Skills shared by the community and the platform library — install them on your agents.'
+                : 'Author reusable skills, install them on your agents, and share them with the community.'}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <StatPill label="My Skills" value={mine.length} />
-            <StatPill label="Community" value={communityCount} />
-            {onNew && (
-              <button
-                type="button"
-                onClick={onNew}
-                className="inline-flex items-center gap-1.5 rounded-[11px] bg-primary px-4 py-2.5 text-[13.5px] font-semibold text-primary-foreground hover:opacity-90"
-              >
-                <Plus className="size-[15px]" /> New skill
-              </button>
-            )}
-          </div>
+          {scope === 'mine' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <StatPill label="My Skills" value={mine.length} />
+              {onNew && (
+                <button
+                  type="button"
+                  onClick={onNew}
+                  className="inline-flex items-center gap-1.5 rounded-[11px] bg-primary px-4 py-2.5 text-[13.5px] font-semibold text-primary-foreground hover:opacity-90"
+                >
+                  <Plus className="size-[15px]" /> New skill
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
-        <section className="mt-7">
-          <SectionHeader title="My Skills" count={mine.length} subtitle="Reusable skills you authored — edit, install on an agent, or share." />
-          {loading ? (
-            <LoadingRow />
-          ) : mine.length ? (
-            <div className={PAGE_GRID_CLASS}>
-              {mine.map((skill) => (
-                <MySkillCard key={skill.id} skill={skill} agents={agents} onEdit={onEditDraft} onChanged={reload} />
-              ))}
-            </div>
-          ) : (
-            <EmptySkills />
-          )}
-        </section>
+        {scope === 'mine' && (
+          <section className="mt-7">
+            <SectionHeader title="My Skills" count={mine.length} subtitle="Reusable skills you authored — edit, install on an agent, or share." />
+            {loading ? (
+              <LoadingRow />
+            ) : mine.length ? (
+              <div className={PAGE_GRID_CLASS}>
+                {mine.map((skill) => (
+                  <MySkillCard key={skill.id} skill={skill} agents={agents} onEdit={onEditDraft} onChanged={reload} />
+                ))}
+              </div>
+            ) : (
+              <EmptySkills />
+            )}
+          </section>
+        )}
 
-        <section className="mt-10">
+        {scope === 'community' && (
+        <section className="mt-7">
           <SectionHeader title="Community Skills" count={communityCount} subtitle="Skills shared by others, plus the platform library." />
           {loading ? (
             <LoadingRow />
@@ -133,6 +141,7 @@ export function SkillsPage({
             </div>
           )}
         </section>
+        )}
       </div>
     </div>
   )

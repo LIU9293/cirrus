@@ -132,7 +132,18 @@ export interface CanvasFlowUpdate {
   defineMessages?: MiniappRecord['defineMessages']
 }
 
-export type NavView = 'flow' | 'newSkill' | 'skills' | 'agents' | 'runtime' | 'community'
+export type NavView =
+  | 'flow'
+  | 'newSkill'
+  | 'communitySkills'
+  | 'communityAgents'
+  | 'dashSkills'
+  | 'dashAgents'
+  | 'dashBots'
+  | 'dashRuntimes'
+  | 'dashModel'
+  | 'dashSandbox'
+  | 'dashSettings'
 
 export interface AgentFlowNavState {
   steps: { key: string; label: string }[]
@@ -374,7 +385,7 @@ export function AgentCanvas({ miniapp, onUpdateFlow, onNavigate, onNavStateChang
                 hasMiniApp={!!miniapp.html}
                 onFinish={() => {
                   goTo('done')
-                  onNavigate('agents')
+                  onNavigate('dashAgents')
                 }}
                 onViewMiniApp={(r) => openPanel('miniapp', r)}
               />
@@ -2508,12 +2519,14 @@ export function MyAgentsPage({
   onNew,
   onRemove,
   onNavigate,
+  scope = 'all',
 }: {
   agents: MiniappRecord[]
   onOpen: (id: string) => void
   onNew: () => void
   onRemove: (id: string) => void
   onNavigate: (v: NavView) => void
+  scope?: 'mine' | 'all'
 }) {
   return (
     <div className="dot-bg relative h-full w-full overflow-auto">
@@ -2521,7 +2534,7 @@ export function MyAgentsPage({
         <div className={PAGE_HEADER_CLASS}>
           <div>
             <h1 className="text-[28px] font-bold tracking-tight text-ink">Agents</h1>
-            <p className="mt-1.5 text-[13.5px] text-ink-secondary">Your agents and community agents in one place.</p>
+            <p className="mt-1.5 text-[13.5px] text-ink-secondary">{scope === 'mine' ? 'Create, configure, and run your own agents.' : 'Your agents and community agents in one place.'}</p>
           </div>
           <button
             onClick={onNew}
@@ -2536,7 +2549,7 @@ export function MyAgentsPage({
             <span className="rounded-full bg-surface-muted px-2.5 py-1 text-[11px] font-semibold text-ink-secondary">{agents.length}</span>
           </div>
           {agents.length === 0 ? (
-            <EmptyAgents onNew={onNew} onBrowseCommunity={() => onNavigate('community')} compact />
+            <EmptyAgents onNew={onNew} onBrowseCommunity={() => onNavigate('communityAgents')} compact />
           ) : (
             <div className={PAGE_GRID_CLASS}>
               {agents.map((a) => (
@@ -2553,7 +2566,7 @@ export function MyAgentsPage({
           )}
         </section>
 
-        <CommunityAgentsSection onNavigate={onNavigate} />
+        {scope !== 'mine' && <CommunityAgentsSection onNavigate={onNavigate} />}
       </div>
     </div>
   )
@@ -3004,7 +3017,7 @@ function PublishedAgentCard({ agent, onNavigate }: { agent: PublishedAgent; onNa
 
       {addOpen &&
         createPortal(
-          <AddToRuntimeDialog agentRef={agentRef} agentName={agent.name} onClose={() => setAddOpen(false)} onNavigateRuntime={() => onNavigate('runtime')} />,
+          <AddToRuntimeDialog agentRef={agentRef} agentName={agent.name} onClose={() => setAddOpen(false)} onNavigateRuntime={() => onNavigate('dashRuntimes')} />,
           document.body,
         )}
     </div>
@@ -3078,7 +3091,7 @@ function CommunityAgentCard({ agent, usedIn, onNavigate }: { agent: CommunityAge
 
       {addOpen &&
         createPortal(
-          <AddToRuntimeDialog agentRef={agentRef} agentName={agent.name} onClose={() => setAddOpen(false)} onNavigateRuntime={() => onNavigate('runtime')} />,
+          <AddToRuntimeDialog agentRef={agentRef} agentName={agent.name} onClose={() => setAddOpen(false)} onNavigateRuntime={() => onNavigate('dashRuntimes')} />,
           document.body,
         )}
     </div>

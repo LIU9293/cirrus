@@ -26,13 +26,16 @@ import { ChatPanel, type UiMessage } from '@/chat/ChatPanel'
 import { MiniappCanvas, type MiniappCanvasHandle } from '@/canvas/MiniappCanvas'
 import { CreationWizard, type WizardFlowUpdate } from '@/wizard/CreationWizard'
 import type { AgentFlowNavState, NavView } from '@/wizard/AgentCanvas'
-import { ROUTES, viewFromPath } from '@/routes'
+import { ROUTES, viewFromPath, isDashboardView } from '@/routes'
 import { AgentFlowPage } from '@/pages/AgentFlowPage'
 import { AgentPage } from '@/pages/AgentPage'
 import { CommunityAgentsPage } from '@/pages/CommunityAgentsPage'
 import { NewSkillPage } from '@/pages/NewSkillPage'
 import { RuntimePage } from '@/pages/RuntimePage'
 import { SkillsPage } from '@/pages/SkillsPage'
+import { DashboardLayout } from '@/components/DashboardLayout'
+import { ModelPage, SandboxPage, BotsPage } from '@/pages/dashboard/ConnectionsPage'
+import { SettingsPage } from '@/pages/dashboard/SettingsPage'
 import { CardNav, type CardNavItem } from '@/components/CardNav'
 import { MotionAccordion } from '@/components/unlumen-ui/motion-faqs-accordion'
 import DotGrid from '@/components/react-bits/DotGrid'
@@ -106,7 +109,7 @@ export function App() {
 
   useEffect(() => {
     if (!auth?.user || window.location.pathname !== '/') return
-    navigate('agents', true)
+    navigate('dashAgents', true)
   }, [auth?.user, navigate])
 
   useEffect(() => {
@@ -234,7 +237,7 @@ export function App() {
           setActiveMiniapp(await getMiniapp(nextList[0].id))
         } else {
           clearActiveMiniapp()
-          navigate('agents', true)
+          navigate('dashAgents', true)
         }
       }
     },
@@ -491,16 +494,34 @@ export function App() {
       centerSlot={(view === 'flow' || view === 'newSkill') && agentFlowNav ? <AgentFlowNavbarStepper state={agentFlowNav} /> : null}
     />
   )
-  if (view === 'skills') return <>{appNavbar}<SkillsPage agents={list} onNew={() => navigate('newSkill')} onEditDraft={openSkillDraft} /></>
+  // Creation: skill wizard
   if (view === 'newSkill') {
     const draftId = new URLSearchParams(window.location.search).get('draft')
     return <>{appNavbar}<NewSkillPage draftId={draftId} onNavigate={navigate} onNavStateChange={setAgentFlowNav} /></>
   }
-  if (view === 'agents') {
-    return <>{appNavbar}<AgentPage agents={list} onOpen={openAgent} onNew={newAgent} onRemove={handleDelete} onNavigate={navigate} /></>
+  // Community discovery (public)
+  if (view === 'communitySkills') return <>{appNavbar}<SkillsPage agents={list} scope="community" /></>
+  if (view === 'communityAgents') return <>{appNavbar}<CommunityAgentsPage onNavigate={navigate} /></>
+  // Dashboard workspace
+  if (isDashboardView(view)) {
+    let page: ReactNode = null
+    if (view === 'dashSkills') page = <SkillsPage agents={list} scope="mine" onNew={() => navigate('newSkill')} onEditDraft={openSkillDraft} />
+    else if (view === 'dashAgents') page = <AgentPage agents={list} scope="mine" onOpen={openAgent} onNew={newAgent} onRemove={handleDelete} onNavigate={navigate} />
+    else if (view === 'dashBots') page = <BotsPage />
+    else if (view === 'dashRuntimes') page = <RuntimePage agents={list} onNavigate={navigate} />
+    else if (view === 'dashModel') page = <ModelPage />
+    else if (view === 'dashSandbox') page = <SandboxPage />
+    else if (view === 'dashSettings') page = <SettingsPage user={auth.user} />
+    return (
+      <>
+        {appNavbar}
+        <DashboardLayout view={view} onNavigate={navigate}>
+          {page}
+        </DashboardLayout>
+      </>
+    )
   }
-  if (view === 'runtime') return <>{appNavbar}<RuntimePage agents={list} onNavigate={navigate} /></>
-  if (view === 'community') return <>{appNavbar}<CommunityAgentsPage onNavigate={navigate} /></>
+  // Agent creation/edit flow (view === 'flow')
   if (miniapp) {
     return (
       <>
@@ -651,22 +672,24 @@ function AppNavbar({
   const items = useMemo<CardNavItem[]>(
     () => [
       {
-        label: 'Agents',
+        label: 'Community',
         bgColor: '#f3f0ff',
         textColor: '#29215d',
         icon: <AgentNavIllo />,
         links: [
-          { label: 'All Skills', ariaLabel: 'Open Skills', active: view === 'skills', onClick: () => onNavigate('skills') },
-          { label: 'All Agents', ariaLabel: 'Open Agents', active: view === 'agents' || view === 'community', onClick: () => onNavigate('agents') },
+          { label: 'Skills', ariaLabel: 'Community skills', active: view === 'communitySkills', onClick: () => onNavigate('communitySkills') },
+          { label: 'Agents', ariaLabel: 'Community agents', active: view === 'communityAgents', onClick: () => onNavigate('communityAgents') },
         ],
       },
       {
-        label: 'Runtime',
+        label: 'Dashboard',
         bgColor: '#edfdf7',
         textColor: '#123b2f',
         icon: <RuntimeNavIllo />,
         links: [
-          { label: 'My Runtimes', ariaLabel: 'Open My Runtimes', active: view === 'runtime', onClick: () => onNavigate('runtime') },
+          { label: 'Agents', ariaLabel: 'My agents', active: view === 'dashAgents', onClick: () => onNavigate('dashAgents') },
+          { label: 'Skills', ariaLabel: 'My skills', active: view === 'dashSkills', onClick: () => onNavigate('dashSkills') },
+          { label: 'Runtimes', ariaLabel: 'My runtimes', active: view === 'dashRuntimes', onClick: () => onNavigate('dashRuntimes') },
         ],
       },
       {
@@ -674,8 +697,9 @@ function AppNavbar({
         bgColor: '#f6f6f2',
         textColor: '#2f302b',
         links: [
-          { label: 'Profile', ariaLabel: 'Open Profile' },
-          { label: 'Settings', ariaLabel: 'Open Settings' },
+          { label: 'Model', ariaLabel: 'Model connections', active: view === 'dashModel', onClick: () => onNavigate('dashModel') },
+          { label: 'Sandbox', ariaLabel: 'Sandbox connections', active: view === 'dashSandbox', onClick: () => onNavigate('dashSandbox') },
+          { label: 'Settings', ariaLabel: 'Settings', active: view === 'dashSettings', onClick: () => onNavigate('dashSettings') },
         ],
       },
     ],

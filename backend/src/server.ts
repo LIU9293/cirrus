@@ -4,6 +4,18 @@ import cors from 'cors'
 import { join } from 'node:path'
 import { config } from './config.ts'
 import { registerAuthRoutes, requireAuth } from './auth/index.ts'
+import { sessionUserId } from './auth/session.ts'
+import { runWithLLM, resolveUserLLM, resolveUserSandbox, invalidateUserLLM } from './agent/llmContext.ts'
+import {
+  listConnections,
+  getConnection,
+  createConnection,
+  updateConnection,
+  deleteConnection,
+  setDefaultConnection,
+  toPublic as connectionToPublic,
+  type ConnectionRow,
+} from './connections/store.ts'
 import * as db from './db.ts'
 import { createMiniapp, deleteMiniapp, listRecords, listPublishedRecords, loadRecord, saveRecord } from './store.ts'
 import { runDeveloperAgent, type ChatTurn, type AgentEvent } from './agent/developerAgent.ts'
@@ -67,6 +79,7 @@ import {
   type SkillRecord,
   type SkillSetting,
   type SkillToolCall,
+  type ConnectionKind,
 } from '../../shared/protocol.ts'
 
 const app = express()
@@ -76,6 +89,22 @@ app.use(express.json({ limit: '4mb' }))
 // Auth endpoints (public). Everything under /api/miniapps and /api/runtimes is
 // gated to the signed-in user and scoped to data they own.
 registerAuthRoutes(app)
+
+// Bring-Your-Own-Model: resolve the signed-in user's default model connection and
+// run the whole request inside its LLM context (the `openai` proxy + llmModel()
+// read it). No session → platform default. Runtime ops may override per-runtime.
+app.use(async (req, _res, next) => {
+  try {
+    const uid = sessionUserId(req)
+    if (uid) {
+      const [llm, sandbox] = await Promise.all([resolveUserLLM(uid), resolveUserSandbox(uid)])
+      return runWithLLM({ userId: uid, llm, sandbox }, () => next())
+    }
+  } catch {
+    /* fall through to platform default */
+  }
+  next()
+})
 
 async function requireOwnMiniapp(req: Request, res: Response, next: NextFunction) {
   const record = await loadRecord(req.params.id)
@@ -695,6 +724,77 @@ app.post('/api/skills/:id/install', requireAuth, requireOwnSkill, async (req, re
   if (!record) return res.status(404).json({ error: 'agent not found' })
   if (record.ownerId && req.userId && record.ownerId !== req.userId) return res.status(404).json({ error: 'agent not found' })
   res.json(await installSkillOntoMiniapp(skill, record))
+})
+
+// ── User connection resources: Model / Sandbox / Bot (BYO compute + channels) ──
+
+const CONNECTION_KINDS: ConnectionKind[] = ['model', 'sandbox', 'bot']
+
+function sanitizeConnectionData(kind: ConnectionKind, data: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  if (typeof data.name === 'string') out.name = data.name.trim()
+  if (data.isDefault === true) out.isDefault = true
+  if (kind === 'model') {
+    if (typeof data.endpoint === 'string') out.endpoint = data.endpoint.trim()
+    if (typeof data.model === 'string') out.model = data.model.trim()
+  } else if (kind === 'sandbox') {
+    out.provider = data.provider === 'daytona' ? 'daytona' : 'e2b'
+  } else if (kind === 'bot') {
+    if (typeof data.platform === 'string') out.platform = data.platform
+    if ('runtimeId' in data) out.runtimeId = data.runtimeId ?? null
+  }
+  return out
+}
+
+async function ownConnection(req: Request, res: Response): Promise<ConnectionRow | null> {
+  const conn = await getConnection(req.params.id)
+  if (!conn || (conn.ownerId && req.userId && conn.ownerId !== req.userId)) {
+    res.status(404).json({ error: 'not found' })
+    return null
+  }
+  return conn
+}
+
+app.get('/api/connections', requireAuth, async (req, res) => {
+  const k = String(req.query.kind ?? '') as ConnectionKind
+  const rows = await listConnections(req.userId!, CONNECTION_KINDS.includes(k) ? k : undefined)
+  res.json({ connections: rows.map(connectionToPublic) })
+})
+
+app.post('/api/connections', requireAuth, async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>
+  const kind = body.kind as ConnectionKind
+  if (!CONNECTION_KINDS.includes(kind)) return res.status(400).json({ error: 'invalid kind' })
+  const secret = typeof body.secret === 'string' ? body.secret : undefined
+  const conn = await createConnection(req.userId!, kind, sanitizeConnectionData(kind, body), secret)
+  invalidateUserLLM(req.userId!)
+  res.json({ connection: connectionToPublic(conn) })
+})
+
+app.put('/api/connections/:id', requireAuth, async (req, res) => {
+  const conn = await ownConnection(req, res)
+  if (!conn) return
+  const body = (req.body ?? {}) as Record<string, unknown>
+  const secret = typeof body.secret === 'string' ? body.secret : undefined
+  const updated = await updateConnection(conn.id, sanitizeConnectionData(conn.kind, body), secret)
+  invalidateUserLLM(req.userId!)
+  res.json({ connection: updated ? connectionToPublic(updated) : null })
+})
+
+app.delete('/api/connections/:id', requireAuth, async (req, res) => {
+  const conn = await ownConnection(req, res)
+  if (!conn) return
+  await deleteConnection(conn.id)
+  invalidateUserLLM(req.userId!)
+  res.json({ ok: true })
+})
+
+app.post('/api/connections/:id/default', requireAuth, async (req, res) => {
+  const conn = await ownConnection(req, res)
+  if (!conn) return
+  await setDefaultConnection(req.userId!, conn.kind, conn.id)
+  invalidateUserLLM(req.userId!)
+  res.json({ ok: true })
 })
 
 // Analyse the app's goal and attach the planned skills (auto-add library matches,

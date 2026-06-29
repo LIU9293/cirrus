@@ -1,5 +1,5 @@
 import type { OpenAI } from 'openai'
-import { openai } from '../agent/client.ts'
+import { openai, llmModel } from '../agent/client.ts'
 import { config } from '../config.ts'
 import { getSandboxDriver } from '../sandbox/index.ts'
 import { saveRecord } from '../store.ts'
@@ -185,7 +185,7 @@ export async function draftSkill(description: string): Promise<DraftSkillResult>
 
   try {
     const completion = await openai.chat.completions.create({
-      model: config.model,
+      model: llmModel(),
       messages: [
         {
           role: 'system',
@@ -286,7 +286,7 @@ export async function generateToolScript(skill: SkillRecord, toolName: string, n
   if (config.apiKey) {
     try {
       const completion = await openai.chat.completions.create({
-        model: config.model,
+        model: llmModel(),
         messages: [
           {
             role: 'system',
@@ -344,7 +344,7 @@ export async function refineSkillFile(skill: SkillRecord, path: string, instruct
   let next: string
   try {
     const c = await openai.chat.completions.create({
-      model: config.model,
+      model: llmModel(),
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: [`File: ${path}`, '', 'Current content:', current || '(empty)', '', `Instruction: ${instruction}`].join('\n') },

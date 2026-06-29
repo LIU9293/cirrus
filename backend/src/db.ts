@@ -75,6 +75,18 @@ create table if not exists miniapp_files (
   primary key (miniapp_id, path)
 );
 
+create table if not exists user_connections (
+  id          text primary key,
+  owner_id    text not null,
+  kind        text not null,          -- 'model' | 'sandbox' | 'bot'
+  data        jsonb not null,         -- non-secret fields (name, endpoint, model, provider, platform, isDefault, runtimeId, …)
+  secret      text,                   -- api key / token; never returned to the client
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index if not exists user_connections_owner_idx on user_connections(owner_id);
+create index if not exists user_connections_kind_idx on user_connections(owner_id, kind);
+
 create table if not exists skills (
   id          text primary key,
   owner_id    text not null,

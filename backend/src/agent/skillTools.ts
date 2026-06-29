@@ -1,6 +1,6 @@
 import type { AgentTool } from '@earendil-works/pi-agent-core'
 import type { Type as TypeNS } from '@earendil-works/pi-ai'
-import { openai } from './client.ts'
+import { openai, llmModel } from './client.ts'
 import { config } from '../config.ts'
 import { saveRecord } from '../store.ts'
 import { getSandboxDriver } from '../sandbox/index.ts'
@@ -90,7 +90,7 @@ function toolResult(payload: unknown, terminate = false) {
 
 async function llm(system: string, user: string): Promise<string> {
   const c = await openai.chat.completions.create({
-    model: config.model,
+    model: llmModel(),
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: user },

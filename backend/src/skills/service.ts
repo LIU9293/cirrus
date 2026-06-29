@@ -1,5 +1,5 @@
 import type { OpenAI } from 'openai'
-import { openai } from '../agent/client.ts'
+import { openai, llmModel } from '../agent/client.ts'
 import { config } from '../config.ts'
 import { saveRecord, loadRecord } from '../store.ts'
 import { writeAgentFile, readAgentFile } from '../agentfs.ts'
@@ -195,7 +195,7 @@ export async function analyzeSkill(description: string): Promise<AnalyzeSkillRes
 
   try {
     const completion = await openai.chat.completions.create({
-      model: config.model,
+      model: llmModel(),
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: `Skill the creator wants:\n${goal}\n\nCall draft_skill.` },
@@ -362,7 +362,7 @@ export async function refineFile(record: MiniappRecord, path: string, instructio
   let next: string
   try {
     const c = await openai.chat.completions.create({
-      model: config.model,
+      model: llmModel(),
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },
@@ -679,7 +679,7 @@ export async function chatAboutSkill(
       },
     ]
     const c = await openai.chat.completions.create({
-      model: config.model,
+      model: llmModel(),
       messages,
       tools: toolsSpec,
       tool_choice: 'auto',
@@ -748,7 +748,7 @@ export async function chatAboutSurface(
 
   try {
     const c = await openai.chat.completions.create({
-      model: config.model,
+      model: llmModel(),
       messages: [
         { role: 'system', content: system },
         ...history.map((h) => ({ role: h.role, content: h.content })),
@@ -774,7 +774,7 @@ async function generateSkillCode(name: string, description: string, notes: strin
     .join('\n')
   try {
     const completion = await openai.chat.completions.create({
-      model: config.model,
+      model: llmModel(),
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },

@@ -1,7 +1,7 @@
 import { saveRecord } from '../store.ts'
 import type { MiniappRecord } from '../../../shared/protocol.ts'
 import { getDatastoreDriver, type Column, type ColumnType, type QuerySpec } from './index.ts'
-import { openai } from '../agent/client.ts'
+import { openai, llmModel } from '../agent/client.ts'
 import { config } from '../config.ts'
 import { getSandboxDriver } from '../sandbox/index.ts'
 
@@ -225,7 +225,7 @@ async function generateImporterCode(input: AgentImportInput): Promise<string> {
     importSample(input.text),
   ].filter(Boolean).join('\n')
   const completion = await openai.chat.completions.create({
-    model: config.model,
+    model: llmModel(),
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: user },

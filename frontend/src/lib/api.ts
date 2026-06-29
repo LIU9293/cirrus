@@ -18,6 +18,11 @@ import type {
   SkillSetting,
   SkillTemplate,
   SkillToolCall,
+  ConnectionKind,
+  UserConnection,
+  ModelConnection,
+  SandboxConnection,
+  BotConnection,
 } from '@shared/protocol'
 
 export interface SkillPlanResult {
@@ -905,4 +910,48 @@ async function* streamEvents(res: Response): AsyncGenerator<AgentEvent> {
       }
     }
   }
+}
+
+/* ───────── User connections (Model / Sandbox / Bot) ───────── */
+
+export async function listConnections<T extends UserConnection = UserConnection>(kind?: ConnectionKind): Promise<T[]> {
+  const q = kind ? `?kind=${kind}` : ''
+  const data = await json<{ connections: T[] }>(await fetch(`/api/connections${q}`, { credentials: 'include' }))
+  return data.connections
+}
+
+export const listModelConnections = () => listConnections<ModelConnection>('model')
+export const listSandboxConnections = () => listConnections<SandboxConnection>('sandbox')
+export const listBotConnections = () => listConnections<BotConnection>('bot')
+
+export async function createConnection(input: Record<string, unknown> & { kind: ConnectionKind }): Promise<UserConnection> {
+  const data = await json<{ connection: UserConnection }>(
+    await fetch('/api/connections', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(input),
+    }),
+  )
+  return data.connection
+}
+
+export async function updateConnection(id: string, input: Record<string, unknown>): Promise<UserConnection> {
+  const data = await json<{ connection: UserConnection }>(
+    await fetch(`/api/connections/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(input),
+    }),
+  )
+  return data.connection
+}
+
+export async function deleteConnection(id: string): Promise<void> {
+  await fetch(`/api/connections/${id}`, { method: 'DELETE', credentials: 'include' })
+}
+
+export async function setDefaultConnection(id: string): Promise<void> {
+  await fetch(`/api/connections/${id}/default`, { method: 'POST', credentials: 'include' })
 }

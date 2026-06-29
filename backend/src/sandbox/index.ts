@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { currentSandbox } from '../agent/llmContext.ts'
 
 // Sandbox abstraction. Generated/untrusted skill code runs through a SandboxDriver
 // so we can develop locally now and flip to E2B later by changing one env var:
@@ -38,50 +39,60 @@ const LocalDriver: SandboxDriver = {
   },
 }
 
-const E2BDriver: SandboxDriver = {
-  name: 'e2b',
-  async runCode(code, opts) {
-    if (!process.env.E2B_API_KEY) {
-      return { ok: false, stdout: '', stderr: '', error: 'E2B_API_KEY is not set. Set it (and optionally E2B_DOMAIN) to use the E2B sandbox.' }
-    }
-    let mod: any
-    try {
-      // @ts-ignore optional peer dependency — install @e2b/code-interpreter to enable
-      mod = await import('@e2b/code-interpreter')
-    } catch {
-      return {
-        ok: false,
-        stdout: '',
-        stderr: '',
-        error: 'E2B SDK not installed. Run `npm i @e2b/code-interpreter` in backend to enable the e2b driver.',
+/** Build an E2B driver bound to a specific API key (the user's BYO key, or env). */
+function makeE2BDriver(apiKey: string | undefined, domain?: string): SandboxDriver {
+  return {
+    name: 'e2b',
+    async runCode(code, opts) {
+      if (!apiKey) {
+        return { ok: false, stdout: '', stderr: '', error: 'No E2B API key configured. Add an E2B sandbox in Dashboard → Sandbox, or set E2B_API_KEY.' }
       }
-    }
-    const Sandbox = mod.Sandbox
-    let sbx: any
-    try {
-      // `domain` (or E2B_DOMAIN env) points at a self-hosted / local control plane.
-      sbx = await Sandbox.create({
-        apiKey: process.env.E2B_API_KEY,
-        ...(process.env.E2B_DOMAIN ? { domain: process.env.E2B_DOMAIN } : {}),
-        timeoutMs: opts?.timeoutMs ?? 30_000,
-      })
-      // E2B's code-interpreter defaults to Python; our skills are JS.
-      const exec = await sbx.runCode(code, { language: 'js' })
-      const stdout = (exec.logs?.stdout ?? []).join('\n')
-      const stderr = (exec.logs?.stderr ?? []).join('\n')
-      return { ok: !exec.error, stdout, stderr, error: exec.error ? String(exec.error.value ?? exec.error) : undefined }
-    } catch (err) {
-      return { ok: false, stdout: '', stderr: '', error: String((err as Error)?.message ?? err) }
-    } finally {
+      let mod: any
       try {
-        await sbx?.kill?.()
+        // @ts-ignore optional peer dependency — install @e2b/code-interpreter to enable
+        mod = await import('@e2b/code-interpreter')
       } catch {
-        /* ignore */
+        return { ok: false, stdout: '', stderr: '', error: 'E2B SDK not installed. Run `npm i @e2b/code-interpreter` in backend to enable the e2b driver.' }
       }
-    }
-  },
+      const Sandbox = mod.Sandbox
+      let sbx: any
+      try {
+        sbx = await Sandbox.create({ apiKey, ...(domain ? { domain } : {}), timeoutMs: opts?.timeoutMs ?? 30_000 })
+        const exec = await sbx.runCode(code, { language: 'js' })
+        const stdout = (exec.logs?.stdout ?? []).join('\n')
+        const stderr = (exec.logs?.stderr ?? []).join('\n')
+        return { ok: !exec.error, stdout, stderr, error: exec.error ? String(exec.error.value ?? exec.error) : undefined }
+      } catch (err) {
+        return { ok: false, stdout: '', stderr: '', error: String((err as Error)?.message ?? err) }
+      } finally {
+        try {
+          await sbx?.kill?.()
+        } catch {
+          /* ignore */
+        }
+      }
+    },
+  }
 }
 
+/** Daytona driver placeholder — wire the real SDK when the integration lands. */
+function makeDaytonaDriver(_apiKey: string): SandboxDriver {
+  return {
+    name: 'daytona',
+    async runCode() {
+      return { ok: false, stdout: '', stderr: '', error: 'Daytona sandbox is not implemented yet. Use E2B or the local driver for now.' }
+    },
+  }
+}
+
+const envE2BDriver = makeE2BDriver(process.env.E2B_API_KEY, process.env.E2B_DOMAIN)
+
+/** Resolve the sandbox driver for the acting request: the user's configured
+ *  sandbox (BYO) → the env-selected default → the local dev driver. */
 export function getSandboxDriver(): SandboxDriver {
-  return (process.env.SANDBOX_DRIVER ?? 'local') === 'e2b' ? E2BDriver : LocalDriver
+  const user = currentSandbox()
+  if (user?.key) {
+    return user.provider === 'daytona' ? makeDaytonaDriver(user.key) : makeE2BDriver(user.key)
+  }
+  return (process.env.SANDBOX_DRIVER ?? 'local') === 'e2b' ? envE2BDriver : LocalDriver
 }

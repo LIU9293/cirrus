@@ -305,6 +305,55 @@ export interface SkillTemplate {
   files?: Record<string, string>
 }
 
+/* ───────── User connection resources (BYO compute + channels) ─────────
+ * Model, Sandbox, and Bot are reusable, user-level resources. Each holds a
+ * secret the platform stores but never returns; a runtime composes them. */
+
+export type ConnectionKind = 'model' | 'sandbox' | 'bot'
+
+export interface ModelConnection {
+  id: string
+  kind: 'model'
+  name: string
+  /** OpenAI-compatible base URL, e.g. https://api.openai.com/v1 */
+  endpoint: string
+  /** Model id, e.g. gpt-4o, claude-3-5-sonnet, … */
+  model: string
+  /** Used for studio/authoring LLM calls and as a runtime fallback. */
+  isDefault: boolean
+  /** Whether an API key is stored (the key itself is never returned). */
+  hasKey: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SandboxConnection {
+  id: string
+  kind: 'sandbox'
+  name: string
+  provider: 'e2b' | 'daytona'
+  isDefault: boolean
+  hasKey: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface BotConnection {
+  id: string
+  kind: 'bot'
+  name: string
+  platform: BotPlatform
+  hasToken: boolean
+  /** Present for shape-consistency with other connections; not meaningful for bots. */
+  isDefault: boolean
+  /** The runtime this bot is currently attached to (a bot serves one runtime). */
+  runtimeId?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type UserConnection = ModelConnection | SandboxConnection | BotConnection
+
 /** One capability the planner decided the app needs. */
 export interface SkillPlanItem {
   /** The capability in plain words, e.g. "access a vocabulary library". */
