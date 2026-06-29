@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Bot, Check, Cpu, Loader2, Plus, Server, Star, Trash2 } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Bot, Check, Cpu, Loader2, Plus, Server, Star, Trash2, X } from 'lucide-react'
 import type { UserConnection } from '@shared/protocol'
 import { createConnection, deleteConnection, listConnections, setDefaultConnection, updateConnection } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -100,58 +101,74 @@ function ConnectionsManager({ kind, title, description, icon, addLabel, fields, 
           </button>
         </div>
 
-        {editing && (
-          <div className="mt-6 rounded-[16px] border border-border bg-white p-5 shadow-[0_8px_24px_-12px_rgba(25,25,23,0.10)]">
-            <div className="text-[14px] font-semibold text-ink">{editing.id ? 'Edit connection' : addLabel}</div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              {fields.map((f) => (
-                <label key={f.key} className={cn('grid gap-1.5', f.type !== 'select' && !f.secret && f.key === 'name' ? 'sm:col-span-2' : '')}>
-                  <span className="text-[11.5px] font-semibold text-ink-secondary">
-                    {f.label}
-                    {f.secret && editing.id ? <span className="ml-1.5 font-normal text-ink-tertiary">— leave blank to keep</span> : null}
-                  </span>
-                  {f.type === 'select' ? (
-                    <select
-                      value={editing.values[f.key] ?? ''}
-                      onChange={(e) => setEditing((s) => (s ? { ...s, values: { ...s.values, [f.key]: e.target.value } } : s))}
-                      className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-[13px] text-ink outline-none focus:border-primary"
-                    >
-                      {(f.options ?? []).map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      value={editing.values[f.key] ?? ''}
-                      onChange={(e) => setEditing((s) => (s ? { ...s, values: { ...s.values, [f.key]: e.target.value } } : s))}
-                      type={f.secret || f.type === 'password' ? 'password' : 'text'}
-                      placeholder={f.placeholder}
-                      className="rounded-[10px] border border-border bg-white px-3 py-2.5 font-mono text-[13px] text-ink outline-none focus:border-primary"
-                    />
-                  )}
-                </label>
-              ))}
-            </div>
-            <div className="mt-4 flex items-center gap-2">
-              <button onClick={save} disabled={busy} className="inline-flex items-center gap-1.5 rounded-[10px] bg-primary px-4 py-2 text-[13px] font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50">
-                {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Save
-              </button>
-              <button onClick={() => setEditing(null)} className="rounded-[10px] px-3.5 py-2 text-[13px] font-medium text-ink-secondary hover:bg-surface-muted">
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
+        {editing &&
+          createPortal(
+            <div className="fixed inset-0 z-[200] grid place-items-center bg-ink/40 p-6 backdrop-blur-sm" onMouseDown={() => !busy && setEditing(null)}>
+              <div
+                className="w-full max-w-[460px] overflow-hidden rounded-[18px] border border-border bg-white shadow-[0_30px_80px_-20px_rgba(25,25,23,0.35)]"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between border-b border-border px-5 py-4">
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex size-8 items-center justify-center rounded-[10px] bg-accent-soft text-accent-ink">{icon}</span>
+                    <div className="text-[15px] font-bold tracking-tight text-ink">{editing.id ? 'Edit connection' : addLabel}</div>
+                  </div>
+                  <button onClick={() => !busy && setEditing(null)} className="rounded-lg p-1.5 text-ink-secondary hover:bg-surface-muted">
+                    <X className="size-[18px]" />
+                  </button>
+                </div>
+                <div className="grid gap-3 px-5 py-4 sm:grid-cols-2">
+                  {fields.map((f) => (
+                    <label key={f.key} className={cn('grid gap-1.5', f.type !== 'select' && !f.secret && f.key === 'name' ? 'sm:col-span-2' : '')}>
+                      <span className="text-[11.5px] font-semibold text-ink-secondary">
+                        {f.label}
+                        {f.secret && editing.id ? <span className="ml-1.5 font-normal text-ink-tertiary">— leave blank to keep</span> : null}
+                      </span>
+                      {f.type === 'select' ? (
+                        <select
+                          value={editing.values[f.key] ?? ''}
+                          onChange={(e) => setEditing((s) => (s ? { ...s, values: { ...s.values, [f.key]: e.target.value } } : s))}
+                          className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-[13px] text-ink outline-none focus:border-primary"
+                        >
+                          {(f.options ?? []).map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          autoFocus={f.key === 'name'}
+                          value={editing.values[f.key] ?? ''}
+                          onChange={(e) => setEditing((s) => (s ? { ...s, values: { ...s.values, [f.key]: e.target.value } } : s))}
+                          type={f.secret || f.type === 'password' ? 'password' : 'text'}
+                          placeholder={f.placeholder}
+                          className="rounded-[10px] border border-border bg-white px-3 py-2.5 font-mono text-[13px] text-ink outline-none focus:border-primary"
+                        />
+                      )}
+                    </label>
+                  ))}
+                </div>
+                <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4">
+                  <button onClick={() => setEditing(null)} className="rounded-[10px] px-3.5 py-2 text-[13px] font-medium text-ink-secondary hover:bg-surface-muted">
+                    Cancel
+                  </button>
+                  <button onClick={save} disabled={busy} className="inline-flex items-center gap-1.5 rounded-[10px] bg-primary px-4 py-2 text-[13px] font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50">
+                    {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Save
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )}
 
         <div className="mt-6 grid gap-3">
           {loading ? (
-            <div className="flex items-center gap-2 rounded-[14px] border border-border bg-white/60 px-4 py-5 text-[13px] text-ink-secondary">
+            <div className="flex items-center gap-2 rounded-[14px] border border-border bg-white px-4 py-5 text-[13px] text-ink-secondary shadow-[0_8px_24px_-14px_rgba(25,25,23,0.10)]">
               <Loader2 className="size-4 animate-spin" /> Loading…
             </div>
           ) : items.length === 0 ? (
-            <div className="rounded-[16px] border border-dashed border-border-strong bg-white/40 px-4 py-12 text-center">
+            <div className="rounded-[16px] border border-dashed border-border-strong bg-white px-4 py-12 text-center shadow-[0_8px_24px_-14px_rgba(25,25,23,0.10)]">
               <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-accent-soft text-accent-ink">{icon}</div>
               <div className="mt-3 text-[15px] font-bold text-ink">Nothing connected yet</div>
               <p className="mx-auto mt-1 max-w-sm text-[12.5px] text-ink-secondary">Add your first {kind} so your agents can use it. Until then, the platform default is used.</p>
