@@ -881,6 +881,18 @@ export async function connectRuntimeBot(id: string, platform: BotPlatform, token
   return data.runtime
 }
 
+/** Attach a saved bot connection (Dashboard → Bots) to a runtime. */
+export async function attachRuntimeBot(id: string, botConnectionId: string): Promise<RuntimeRecord> {
+  const data = await json<{ runtime: RuntimeRecord }>(
+    await fetch(`/api/runtimes/${id}/bots/attach`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ botConnectionId }),
+    }),
+  )
+  return data.runtime
+}
+
 export async function disconnectRuntimeBot(id: string, botId: string): Promise<RuntimeRecord> {
   const data = await json<{ runtime: RuntimeRecord }>(
     await fetch(`/api/runtimes/${id}/bots/${botId}`, { method: 'DELETE' }),

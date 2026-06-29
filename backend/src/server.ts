@@ -13,6 +13,7 @@ import {
   updateConnection,
   deleteConnection,
   setDefaultConnection,
+  setBotRuntime,
   toPublic as connectionToPublic,
   type ConnectionRow,
 } from './connections/store.ts'
@@ -1442,11 +1443,53 @@ app.post('/api/runtimes/:id/bots', async (req, res) => {
   res.json({ runtime: publicRuntime(runtime) })
 })
 
+// Attach a saved bot connection (Dashboard → Bots) to this runtime. The token
+// lives only in the connection's secret; we copy it onto the RuntimeBot so the
+// Telegram poller can use it, and stamp the connection's runtimeId (1 bot ↔ 1 runtime).
+app.post('/api/runtimes/:id/bots/attach', async (req, res) => {
+  const runtime = await loadRuntime(req.params.id)
+  if (!runtime) return res.status(404).json({ error: 'not found' })
+  const botConnectionId = String(req.body?.botConnectionId ?? '')
+  const conn = await getConnection(botConnectionId)
+  if (!conn || conn.kind !== 'bot') return res.status(404).json({ error: 'Bot connection not found.' })
+  if (conn.ownerId !== runtime.ownerId) return res.status(403).json({ error: 'Not your bot.' })
+  if (!conn.secret) return res.status(400).json({ error: 'This bot has no token configured.' })
+
+  // Enforce 1:1 — pull the bot off whatever runtime it was on (could be this one,
+  // making attach idempotent / a token refresh).
+  const priorRuntimeId = (conn.data.runtimeId as string | null) ?? null
+  if (priorRuntimeId && priorRuntimeId !== runtime.id) {
+    const prior = await loadRuntime(priorRuntimeId)
+    if (prior) {
+      prior.bots = prior.bots.filter((b) => b.connectionId !== conn.id)
+      await saveRuntime(prior)
+    }
+  }
+
+  const platform = (conn.data.platform as BotPlatform) ?? 'telegram'
+  runtime.bots = runtime.bots.filter((b) => b.connectionId !== conn.id)
+  runtime.bots.push({
+    id: 'bot-' + Math.random().toString(36).slice(2, 8),
+    platform,
+    label: String(conn.data.name ?? BOT_LABELS[platform] ?? 'Bot'),
+    connectedAt: new Date().toISOString(),
+    token: conn.secret,
+    connectionId: conn.id,
+  })
+  await saveRuntime(runtime)
+  await setBotRuntime(conn.id, runtime.id)
+  void reconcileTelegramListeners() // pick up the attached Telegram bot immediately
+  res.json({ runtime: publicRuntime(runtime) })
+})
+
 app.delete('/api/runtimes/:id/bots/:botId', async (req, res) => {
   const runtime = await loadRuntime(req.params.id)
   if (!runtime) return res.status(404).json({ error: 'not found' })
+  const removed = runtime.bots.find((b) => b.id === req.params.botId)
   runtime.bots = runtime.bots.filter((b) => b.id !== req.params.botId)
   await saveRuntime(runtime)
+  // If it came from a saved bot connection, free that connection (clear runtimeId).
+  if (removed?.connectionId) await setBotRuntime(removed.connectionId, null)
   void reconcileTelegramListeners() // stop the poller for the removed bot
   res.json({ runtime: publicRuntime(runtime) })
 })

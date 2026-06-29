@@ -494,6 +494,8 @@ export interface RuntimeBot {
   token?: string
   /** Whether a token was provided (sent to the client instead of the token). */
   hasToken?: boolean
+  /** Set when this bot came from a saved bot connection (attach), not a pasted token. */
+  connectionId?: string
 }
 
 /** A reference to an agent placed in a runtime. `miniappId` is set for the

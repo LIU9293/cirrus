@@ -46,6 +46,7 @@ import {
 } from 'lucide-react'
 import type {
   BotPlatform,
+  BotConnection,
   CanvasElementSelection,
   CreationPhase,
   CronJob,
@@ -93,6 +94,8 @@ import {
   streamRuntimeCronChat,
   connectRuntimeBot,
   disconnectRuntimeBot,
+  attachRuntimeBot,
+  listBotConnections,
   addRuntimeAgent,
   removeRuntimeAgent,
   updateRuntimeAgentModelConfig,
@@ -3849,6 +3852,10 @@ function RuntimeWindow({
     const rt = await disconnectRuntimeBot(id, botId).catch(() => null)
     if (rt) setRuntime(rt)
   }
+  const attach = async (botConnectionId: string) => {
+    const rt = await attachRuntimeBot(id, botConnectionId).catch(() => null)
+    if (rt) setRuntime(rt)
+  }
   const addAgent = async (ref: RuntimeAgentRef): Promise<void> => {
     const rt = await addRuntimeAgent(id, ref).catch(() => null)
     if (rt) {
@@ -4114,7 +4121,7 @@ function RuntimeWindow({
               )}
             </div>
           )}
-          {activeTab === 'bots' && <BotsPanel bots={runtime?.bots ?? []} onConnect={connect} onDisconnect={disconnect} />}
+          {activeTab === 'bots' && <BotsPanel bots={runtime?.bots ?? []} onConnect={connect} onDisconnect={disconnect} onAttach={attach} />}
           {activeTab === 'details' && <DetailsPanel runtime={runtime} agents={agents} onAddAgent={addAgent} onRemoveAgent={removeAgent} onUpdateAgentModel={updateAgentModel} />}
           {activeTab === 'config' && <ConfigurationPanel runtimeId={id} runtime={runtime} />}
           {activeTab === 'cron' && <CronPanel runtimeId={id} runtime={runtime} compact={compactWindow} />}
@@ -5041,17 +5048,29 @@ function BotsPanel({
   bots,
   onConnect,
   onDisconnect,
+  onAttach,
 }: {
   bots: RuntimeRecord['bots']
   onConnect: (p: BotPlatform, token?: string) => void | Promise<void>
   onDisconnect: (id: string) => void
+  onAttach: (botConnectionId: string) => void | Promise<void>
 }) {
   const [connecting, setConnecting] = useState(false)
+  const [saved, setSaved] = useState<BotConnection[]>([])
+  useEffect(() => {
+    let alive = true
+    listBotConnections().then((list) => alive && setSaved(list)).catch(() => {})
+    return () => { alive = false }
+  }, [bots.length])
+
+  // Saved bots that aren't already attached to this runtime — offer to attach them.
+  const attachedConnIds = new Set(bots.map((b) => b.connectionId).filter(Boolean))
+  const attachable = saved.filter((c) => c.hasToken && !attachedConnIds.has(c.id))
 
   return (
     <div className="relative flex h-full flex-col overflow-auto">
       {bots.length === 0 ? (
-        <BotsEmptyState onConnect={() => setConnecting(true)} />
+        <BotsEmptyState onConnect={() => setConnecting(true)} attachable={attachable} onAttach={onAttach} />
       ) : (
         <div className="flex flex-col gap-3 p-6">
           <div className="flex items-center justify-between">
@@ -5063,6 +5082,25 @@ function BotsPanel({
               <Plus className="size-[14px]" /> Connect a bot
             </button>
           </div>
+          {attachable.length > 0 && (
+            <div className="flex flex-col gap-1.5 rounded-[11px] border border-dashed border-border bg-surface-muted/40 p-2.5">
+              <div className="px-1 font-mono text-[10px] tracking-[0.12em] text-ink-tertiary">FROM YOUR SAVED BOTS</div>
+              {attachable.map((c) => {
+                const opt = BOT_OPTIONS.find((o) => o.platform === c.platform)
+                return (
+                  <div key={c.id} className="flex items-center gap-2.5 rounded-[9px] bg-surface px-2.5 py-1.5">
+                    <span className="flex size-[26px] shrink-0 items-center justify-center rounded-[7px]" style={{ background: `${opt?.color ?? '#5B57F2'}1A`, color: opt?.color ?? '#5B57F2' }}>
+                      {opt?.icon ?? <Bot className="size-[14px]" />}
+                    </span>
+                    <div className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-ink">{c.name}</div>
+                    <button onClick={() => onAttach(c.id)} className="rounded-[7px] border border-border px-2.5 py-1 text-[11.5px] font-semibold text-ink hover:bg-surface-muted">
+                      Attach
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
           <div className="flex flex-col gap-2">
             {bots.map((b) => {
               const opt = BOT_OPTIONS.find((o) => o.platform === b.platform)
@@ -5076,7 +5114,7 @@ function BotsPanel({
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[13px] font-semibold text-ink">{b.label}</div>
-                    <div className="text-[11px] text-ink-tertiary">{b.hasToken ? 'Connected · token saved' : 'Connected'}</div>
+                    <div className="text-[11px] text-ink-tertiary">{b.connectionId ? 'Attached from saved bot' : b.hasToken ? 'Connected · token saved' : 'Connected'}</div>
                   </div>
                   <button onClick={() => onDisconnect(b.id)} className="rounded-md p-1.5 text-ink-tertiary hover:bg-surface-muted hover:text-destructive">
                     <Trash2 className="size-[15px]" />
@@ -5103,7 +5141,7 @@ function BotsPanel({
   )
 }
 
-function BotsEmptyState({ onConnect }: { onConnect: () => void }) {
+function BotsEmptyState({ onConnect, attachable = [], onAttach }: { onConnect: () => void; attachable?: BotConnection[]; onAttach?: (id: string) => void | Promise<void> }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-5 p-6 text-center">
       {/* playful row of platform icons */}
@@ -5130,6 +5168,27 @@ function BotsEmptyState({ onConnect }: { onConnect: () => void }) {
       >
         <Plus className="size-[15px]" /> Connect a bot
       </button>
+      {attachable.length > 0 && onAttach && (
+        <div className="mt-1 w-full max-w-[340px]">
+          <div className="mb-1.5 font-mono text-[10px] tracking-[0.12em] text-ink-tertiary">OR ATTACH A SAVED BOT</div>
+          <div className="flex flex-col gap-1.5">
+            {attachable.map((c) => {
+              const opt = BOT_OPTIONS.find((o) => o.platform === c.platform)
+              return (
+                <div key={c.id} className="flex items-center gap-2.5 rounded-[10px] border border-border bg-surface px-3 py-2 text-left">
+                  <span className="flex size-[26px] shrink-0 items-center justify-center rounded-[7px]" style={{ background: `${opt?.color ?? '#5B57F2'}1A`, color: opt?.color ?? '#5B57F2' }}>
+                    {opt?.icon ?? <Bot className="size-[14px]" />}
+                  </span>
+                  <div className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-ink">{c.name}</div>
+                  <button onClick={() => onAttach(c.id)} className="rounded-[7px] border border-border px-2.5 py-1 text-[11.5px] font-semibold text-ink hover:bg-surface-muted">
+                    Attach
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

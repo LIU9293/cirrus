@@ -75,12 +75,39 @@ function makeE2BDriver(apiKey: string | undefined, domain?: string): SandboxDriv
   }
 }
 
-/** Daytona driver placeholder — wire the real SDK when the integration lands. */
-function makeDaytonaDriver(_apiKey: string): SandboxDriver {
+/** Daytona driver: runs JS in a Daytona sandbox via @daytonaio/sdk (optional peer
+ *  dep — install it to enable, else this returns a graceful error). */
+function makeDaytonaDriver(apiKey: string): SandboxDriver {
   return {
     name: 'daytona',
-    async runCode() {
-      return { ok: false, stdout: '', stderr: '', error: 'Daytona sandbox is not implemented yet. Use E2B or the local driver for now.' }
+    async runCode(code) {
+      if (!apiKey) return { ok: false, stdout: '', stderr: '', error: 'No Daytona API key configured. Add a Daytona sandbox in Dashboard → Sandbox.' }
+      let mod: any
+      try {
+        // @ts-ignore optional peer dependency — install @daytonaio/sdk to enable
+        mod = await import('@daytonaio/sdk')
+      } catch {
+        return { ok: false, stdout: '', stderr: '', error: 'Daytona SDK not installed. Run `npm i @daytonaio/sdk` in backend to enable the daytona driver.' }
+      }
+      const Daytona = mod.Daytona ?? mod.default
+      let daytona: any
+      let sandbox: any
+      try {
+        daytona = new Daytona({ apiKey })
+        sandbox = await daytona.create({ language: 'javascript' })
+        const res = await sandbox.process.codeRun(code)
+        const stdout = String(res?.result ?? res?.stdout ?? '')
+        const exit = Number(res?.exitCode ?? 0)
+        return { ok: exit === 0, stdout, stderr: String(res?.stderr ?? ''), error: exit === 0 ? undefined : `exited with code ${exit}` }
+      } catch (err) {
+        return { ok: false, stdout: '', stderr: '', error: String((err as Error)?.message ?? err) }
+      } finally {
+        try {
+          await (sandbox?.delete?.() ?? daytona?.delete?.(sandbox))
+        } catch {
+          /* ignore */
+        }
+      }
     },
   }
 }
